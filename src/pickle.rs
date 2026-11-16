@@ -228,7 +228,7 @@ impl<'a> Machine<'a> {
     }
 
     fn set_items(&mut self, items: Vec<Value>) -> Result<(), PickleError> {
-        if items.len() % 2 != 0 {
+        if !items.len().is_multiple_of(2) {
             return Err(PickleError::Malformed { what: "SETITEMS pairs", at: self.pos });
         }
         let top = self.top()?.clone();
