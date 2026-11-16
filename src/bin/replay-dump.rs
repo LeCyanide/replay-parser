@@ -3,12 +3,16 @@
 //!   replay-dump meta    <file.wowsreplay>   arena info as JSON
 //!   replay-dump stats   <file.wowsreplay>   per-kind packet counts and decode failures
 //!   replay-dump packets <file.wowsreplay>   one JSON line per packet
+//!   <scripts dir> below can also be a game install directory; the build
+//!   that recorded the replay is read from it.
 //!   replay-dump entities <file.wowsreplay> <scripts dir>
 //!       entity-level decode coverage, with the first failure of each kind
 //!   replay-dump events <file.wowsreplay> <scripts dir>
 //!       one JSON line per decoded entity event
 //!   replay-dump world <file.wowsreplay> <scripts dir>
 //!       one JSON world snapshot per second of game clock
+//!   replay-dump res <game dir> [path]
+//!       list the newest build's packaged files, or write one to stdout
 
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -44,7 +48,7 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (Some(cmd), Some(path)) = (args.first(), args.get(1)) else {
         eprintln!(
-            "usage: replay-dump <meta|stats|packets> <file.wowsreplay>\n       replay-dump <entities|events|world> <file.wowsreplay> <scripts dir>"
+            "usage: replay-dump <meta|stats|packets> <file.wowsreplay>\n       replay-dump <entities|events|world> <file.wowsreplay> <scripts dir>\n       replay-dump res <game dir> [path]"
         );
         std::process::exit(2);
     };
@@ -55,6 +59,19 @@ fn main() {
 }
 
 fn run(cmd: &str, path: &std::path::Path, scripts: Option<&std::path::Path>) -> Result<(), Box<dyn std::error::Error>> {
+    if cmd == "res" {
+        let res = replay_parser::res::Resources::open(path)?;
+        match scripts.and_then(|p| p.to_str()) {
+            Some(file) => std::io::stdout().write_all(&res.read(file)?)?,
+            None => {
+                let mut out = std::io::stdout().lock();
+                for p in res.paths() {
+                    writeln!(out, "{p}")?;
+                }
+            }
+        }
+        return Ok(());
+    }
     if cmd == "meta" {
         let bytes = std::fs::read(path)?;
         let (_, raw) = replay_parser::container::read_meta(&bytes)?;
@@ -97,7 +114,7 @@ fn run(cmd: &str, path: &std::path::Path, scripts: Option<&std::path::Path>) -> 
         }
         "entities" | "events" => {
             let scripts = scripts.ok_or("needs a scripts directory")?;
-            let defs = EntityDefs::load(&ScriptDir(scripts.to_path_buf()))?;
+            let defs = load_defs(scripts, version)?;
             let mut decoder = EntityDecoder::new(&defs);
             let mut out = std::io::stdout().lock();
             let mut ok = 0u64;
@@ -128,7 +145,7 @@ fn run(cmd: &str, path: &std::path::Path, scripts: Option<&std::path::Path>) -> 
         }
         "world" => {
             let scripts = scripts.ok_or("needs a scripts directory")?;
-            let defs = EntityDefs::load(&ScriptDir(scripts.to_path_buf()))?;
+            let defs = load_defs(scripts, version)?;
             let mut decoder = EntityDecoder::new(&defs);
             let mut world = replay_parser::world::World::new(&replay.meta);
             let mut out = std::io::stdout().lock();
@@ -147,4 +164,15 @@ fn run(cmd: &str, path: &std::path::Path, scripts: Option<&std::path::Path>) -> 
         other => return Err(format!("unknown command {other:?}").into()),
     }
     Ok(())
+}
+
+/// Entity defs from a loose `scripts/` directory, or from a game install
+/// (a directory with `bin/`), using the build that recorded the replay.
+fn load_defs(dir: &std::path::Path, version: replay_parser::Version) -> Result<EntityDefs, Box<dyn std::error::Error>> {
+    if dir.join("bin").is_dir() {
+        let res = replay_parser::res::Resources::open_build(dir, version.build)
+            .map_err(|e| format!("build {} of {}: {e}", version.build, dir.display()))?;
+        return Ok(EntityDefs::load(&replay_parser::res::InstallScripts(&res))?);
+    }
+    Ok(EntityDefs::load(&ScriptDir(dir.to_path_buf()))?)
 }

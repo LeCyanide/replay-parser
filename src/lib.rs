@@ -15,6 +15,9 @@
 //! 5. [`world`] — battle state built from those events: ships, deaths,
 //!    scores, capture points, smoke.
 //!
+//! [`res`] reads game files from an install (resource packages, text
+//! catalogues), including the entity defs for step 3.
+//!
 //! [`pickle`] reads the Python pickles found in `PYTHON` values and in
 //! GameParams.
 
@@ -26,6 +29,7 @@ pub mod meta;
 pub mod nested;
 pub mod packet;
 pub mod pickle;
+pub mod res;
 pub mod value;
 pub mod world;
 

@@ -418,9 +418,15 @@ impl World {
                     }
                 }
             }
-            "onArenaStateReceived" => {
+            // Rosters: the arena's at the start, then ships that spawn later
+            // (Operations waves). shortcut: spawned bots missing from the arena
+            // info get no Player, so their ships stay unnamed.
+            "onArenaStateReceived" | "onNewPlayerSpawnedInBattle" => {
                 for (name, v) in args {
-                    let ("playersStates" | "botsStates", Value::Blob(b)) = (*name, v) else { continue };
+                    let ("playersStates" | "botsStates" | "playersData" | "botsData", Value::Blob(b)) = (*name, v)
+                    else {
+                        continue;
+                    };
                     // An unreadable roster leaves ships unlinked, not the world broken.
                     let Ok(pickle::Value::List(entries)) = pickle::from_slice(b) else { continue };
                     for entry in &entries {

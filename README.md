@@ -37,12 +37,14 @@ the same output, built on this crate instead.
    declares.
 4. **Python pickle reader** ☁ — done (`pickle`). Matches CPython on a
    279-case corpus across protocols 0–5 and Python 2 opcodes.
-5. **Game file access** 🖥 — `res_packages` `.idx/.pkg` reader, `bin/<build>`
-   selection, gettext catalog for ship names. Also what lets step 6 read the
-   defs straight from the install instead of a loose `scripts/` folder.
+5. **Game file access** 🖥 — done (`res`). Reads a build's `idx/*.idx`
+   and inflates files from `res_packages/` (CRC32-checked), loose
+   `bin/<build>/res/` first, `res_mods/` ignored; picks `bin/<build>` from
+   the replay's build number; reads the gettext catalogue
+   (`IDS_<ship index>` → ship name). Step 6 reads the defs straight from the
+   install through it (`InstallScripts`).
 6. **Entity definitions + entity decoding** ☁ — done (`defs`, `entity`,
-   `nested`) from a loose `scripts/` directory (`ScriptSource` is the seam for
-   step 5). Methods, properties, creates and nested property updates decode
+   `nested`) from a loose `scripts/` directory or the install. Methods, properties, creates and nested property updates decode
    against tracked per-entity state; see Tests for what is checked.
 7. **GameParams** 🖥 — ships, artillery/torpedo/plane params, consumables, the
    subset the simulation and labels need. The pickle reader is ready for it.
@@ -86,8 +88,9 @@ the same output, built on this crate instead.
     `sidecar/patches/`, and the toolkit's licence entries; keep credit for the
     format knowledge.
 
-Next: 8 for what the replay alone determines (ships, health, smoke, caps,
-scores, deaths), then 5 → 7 locally, then 9 one record tag at a time, each
+Next: 7 (GameParams: ship indexes and classes for names and icons,
+consumable radii, torpedo ranges), buildings in 8 (none in the fixtures;
+Operations replays have them), then 9 one record tag at a time, each
 checked with 10.
 
 ## Usage
@@ -100,7 +103,12 @@ cargo build --release
 ./target/release/replay-dump entities <file.wowsreplay> <scripts dir>   # entity decode coverage
 ./target/release/replay-dump events   <file.wowsreplay> <scripts dir>   # one JSON line per entity event
 ./target/release/replay-dump world    <file.wowsreplay> <scripts dir>   # one world snapshot per game second
+./target/release/replay-dump res      <game dir> [path]                 # list packaged files, or extract one
 ```
+
+`<scripts dir>` can also be a game install directory (the one holding
+`bin/`); the defs then come from the build that recorded the replay, which
+must still be installed (the client keeps the current and previous build).
 
 On Windows, build with the GNU toolchain if MSVC build tools are not
 installed (`cargo +stable-x86_64-pc-windows-gnu test`), and run the
@@ -158,8 +166,23 @@ shares a work time across the two encodings (at least 3 types compared).
 The pickle reader is checked against CPython on `tests/pickle_corpus.json`
 (regenerate with `python3 -I scripts/gen-pickle-corpus.py`).
 
-No pre-12.6 replay is in the corpus, so the legacy wire-id table is
-unverified, and no 15.6+ replay is, so the newest builds are not covered.
+Against a local install (opt in; not run in CI):
+
+```bash
+WOWS_DIR=/path/to/World_of_Warships cargo test --release -- --ignored
+```
+
+checks, for every installed build: every script and map `space.settings`
+inflates and matches its CRC32, GameParams is present, the entity defs load,
+and the catalogue names ships; then every replay in the install's
+`replays/` recorded by an installed build decodes with no failures against
+that build's own defs, links its players (allies always; enemies at most
+once; PvE bot templates may spawn several ships, or none), and the
+recording player's ship index has a name. On the author's machine that is
+217 replays of 15.9 and 15.10, including Operations and a tournament.
+
+No pre-12.6 replay is in the fixture corpus, so the legacy wire-id table is
+unverified; 15.6+ is covered only by the local install test above.
 
 ## Credits
 
