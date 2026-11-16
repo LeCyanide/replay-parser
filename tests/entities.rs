@@ -10,6 +10,7 @@ use replay_parser::defs::EntityDefs;
 use replay_parser::defs::ScriptDir;
 use replay_parser::entity::EntityDecoder;
 use replay_parser::entity::Event;
+use replay_parser::nested::Change;
 use replay_parser::packet::Kind;
 use replay_parser::packet::Packets;
 use replay_parser::pickle;
@@ -76,6 +77,8 @@ fn every_entity_packet_decodes_with_sane_content() {
         let mut vehicles = 0usize;
         let mut rosters: Vec<HashSet<i64>> = Vec::new();
         let mut time_left: Vec<i64> = Vec::new();
+        let mut nested = 0usize;
+        let mut scores = 0usize;
 
         for p in Packets::new(&replay.packets, replay.meta.version().unwrap()) {
             if matches!(
@@ -86,6 +89,8 @@ fn every_entity_packet_decodes_with_sane_content() {
                     | Kind::BasePlayerCreate
                     | Kind::BasePlayerCreateStub
                     | Kind::CellPlayerCreate
+                    | Kind::NestedPropertyUpdate
+                    | Kind::EntityLeave
             ) {
                 entity_packets += 1;
             }
@@ -112,6 +117,24 @@ fn every_entity_packet_decodes_with_sane_content() {
                 Event::Property { entity: "BattleLogic", property: "timeLeft", value, .. } => {
                     time_left.push(value.as_i64().unwrap());
                 }
+                Event::Nested { entity: "BattleLogic", property: "state", change, .. } => {
+                    nested += 1;
+                    if let Change::SetField { field: "score", value } = change {
+                        scores += 1;
+                        let v = value.as_i64().unwrap();
+                        assert!((0..=10_000).contains(&v), "{name}: team score {v}");
+                    }
+                }
+                Event::Nested {
+                    entity: "InteractiveZone",
+                    change: Change::SetField { field: "progress", value },
+                    ..
+                } => {
+                    nested += 1;
+                    let v = value.as_f32().unwrap();
+                    assert!((0.0..=1.0).contains(&v), "{name}: capture progress {v}");
+                }
+                Event::Nested { .. } => nested += 1,
                 Event::Method { method: "onArenaStateReceived", args, .. } => {
                     for (arg, v) in &args {
                         if *arg == "playersStates" || *arg == "botsStates" {
@@ -131,6 +154,8 @@ fn every_entity_packet_decodes_with_sane_content() {
         }
 
         assert_eq!(decoded, entity_packets, "{name}: some entity packets produced no event");
+        assert!(nested > 500, "{name}: only {nested} nested updates");
+        assert!(scores > 0, "{name}: no team score updates");
         assert!(vehicles >= replay.meta.vehicles.len(), "{name}: {vehicles} vehicles created");
         // timeLeft counts the pre-battle countdown down to 0, then restarts at
         // the battle's time limit. Any other increase means a mis-decode.

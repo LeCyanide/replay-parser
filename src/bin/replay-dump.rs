@@ -27,6 +27,14 @@ fn failure_key(e: &EntityError) -> String {
         EntityError::PropertyIndex { entity, index, .. } => format!("{entity}: property index {index}"),
         EntityError::Value { entity, member, .. } => format!("{entity}.{member}: value"),
         EntityError::Leftover { entity, member, .. } => format!("{entity}.{member}: leftover"),
+        EntityError::Nested { entity, member, error } => format!(
+            "{entity}.{member}: nested: {}",
+            match error {
+                replay_parser::nested::NestedError::Value(_) => "value".to_string(),
+                replay_parser::nested::NestedError::Leftover(_) => "leftover".to_string(),
+                other => format!("{other:?}").split(['(', ' ']).next().unwrap_or("").to_string(),
+            }
+        ),
     }
 }
 

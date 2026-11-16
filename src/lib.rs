@@ -21,6 +21,7 @@ pub mod defs;
 pub mod entity;
 pub mod error;
 pub mod meta;
+pub mod nested;
 pub mod packet;
 pub mod pickle;
 pub mod value;
