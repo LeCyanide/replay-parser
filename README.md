@@ -123,10 +123,13 @@ the same output, built on this crate instead.
    the replay. `PLANE` (icon key from the aircraft's species, subtype and
    bomb ammo; owner names except on consumable planes) and fighter
    `PATROL_RADIUS` match on every record. `CONSUMABLE_RADIUS` matches on
-   two replays; on two others we draw circles the toolkit does not: a
-   bot's radar (Operations; the toolkit takes bots' radii from the
-   shipConfig's equipped abilities, not parsed yet) and a submarine
-   locator (id 42; its consumable id table may differ). Not yet: camera
+   two replays; on two others we draw circles the toolkit misses, both
+   its gaps: the suite's toolkit bake builds its consumable id table with
+   `GameConstants::from_vfs`, not `for_build`, so it keeps the pre-15.2
+   ids and reads 15.10's id 42 (submarine locator) as a plane smoke
+   generator; and it has no radius for an Operations bot's radar (bots
+   have no roster entry, and it only looks at their equipped abilities,
+   taking whichever variant a `HashMap` yields first). Not yet: camera
    direction, buildings, buff zones, weather; division gold,
    interpolation between packets.
 10. **Parity harness** — done, in the suite: `npm run diff-timeline -- old.wtreply
@@ -139,7 +142,7 @@ the same output, built on this crate instead.
     format knowledge.
 
 Next: the remaining tags in 9 one at a time, each checked with 10
-(the two consumable-circle gaps first); buildings in 8 (none in the fixtures; Operations
+(camera direction next); buildings in 8 (none in the fixtures; Operations
 replays have them).
 
 ## Usage
