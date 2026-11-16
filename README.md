@@ -115,9 +115,11 @@ the same output, built on this crate instead.
    `isConnected` from `onGameRoomStateChanged`, counted from the first
    time the player is seen connected) matching, bar one frame where a
    change lands on the frame boundary and 4 positions on Sleeping Giant;
-   `HEALTH_BAR` matches except
-   0.4–1.7% of bars the toolkit draws for enemies before their entity
-   exists (rule not worked out; allies get a full bar from the roster);
+   `HEALTH_BAR` has every toolkit bar; a ship not yet in view gets a full
+   bar from the arena roster's `maxHealth`, as the toolkit means to, but
+   its bake gives every ship whose build it can resolve a consumable
+   inventory first, which registers the ship and so skips that seeding
+   (0.1–1.6% extra bars of ours on three replays);
    `TORPEDO` matches on the randoms, and differs on Operations where the
    toolkit freezes homing torpedoes that the server's own
    `receiveTorpedoDirection` positions show moving. Torpedoes launched
@@ -169,7 +171,7 @@ the same output, built on this crate instead.
     format knowledge.
 
 Next: the remaining tags in 9 one at a time, each checked with 10
-(the toolkit's early enemy health bars next).
+(interpolation between packets next).
 
 ## Usage
 

@@ -131,6 +131,8 @@ pub struct Player {
     /// The last connection change shown, as the old renderer records them:
     /// from the first time the player is seen connected.
     pub connection: Option<bool>,
+    /// The arena roster's `maxHealth` (0 if absent).
+    pub max_health: i64,
     /// Every integer in this player's `onArenaStateReceived` roster entry.
     /// The entry's keys are version-specific indices (players and bots use
     /// different ones), so a ship is linked by finding its Vehicle entity id
@@ -396,19 +398,27 @@ struct RosterKeys {
     id: i64,
     connected: i64,
     prebattle: i64,
+    max_health: i64,
+    /// Bots' entries have their own fields; known from 0.12.8.
+    bot_max_health: Option<i64>,
 }
 
 /// The roster keys by client version (the old renderer's table; the keys
 /// are the field names sorted, and fields added over time shift them).
 fn roster_keys(v: (u32, u32, u32)) -> RosterKeys {
-    let (id, connected, prebattle) = match v {
-        v if v >= (15, 10, 0) => (12, 18, 30),
-        v if v >= (0, 11, 11) => (11, 17, 29),
-        v if v >= (0, 10, 9) => (11, 17, 28),
-        v if v >= (0, 10, 7) => (10, 16, 27),
-        _ => (10, 15, 26),
+    let (id, connected, prebattle, max_health) = match v {
+        v if v >= (15, 10, 0) => (12, 18, 30, 25),
+        v if v >= (0, 11, 11) => (11, 17, 29, 24),
+        v if v >= (0, 10, 9) => (11, 17, 28, 23),
+        v if v >= (0, 10, 7) => (10, 16, 27, 22),
+        _ => (10, 15, 26, 21),
     };
-    RosterKeys { id, connected, prebattle }
+    let bot_max_health = match v {
+        v if v >= (15, 10, 0) => Some(19),
+        v if v >= (0, 12, 8) => Some(18),
+        _ => None,
+    };
+    RosterKeys { id, connected, prebattle, max_health, bot_max_health }
 }
 
 /// A field of a roster entry, a list of `(key, value)` tuples.
@@ -470,6 +480,7 @@ impl World {
                 division: 0,
                 connected: false,
                 connection: None,
+                max_health: 0,
                 roster: HashSet::new(),
             })
             .collect();
@@ -741,6 +752,15 @@ impl World {
                             .find(|p| ints.contains(&p.meta_id) && ints.contains(&p.ship_params_id))
                         {
                             p.roster = ints;
+                            // The arena roster's health seeds ships not yet in view.
+                            let health_key = match (*name, self.roster_keys) {
+                                ("playersStates", Some(k)) => Some(k.max_health),
+                                ("botsStates", Some(k)) => k.bot_max_health,
+                                _ => None,
+                            };
+                            if let Some(h) = health_key.and_then(|h| roster_int(entry, h)) {
+                                p.max_health = h;
+                            }
                             if let ("playersStates" | "playersData", Some(k)) = (*name, self.roster_keys) {
                                 p.division = roster_int(entry, k.prebattle).unwrap_or(0);
                                 p.connected = roster_bool(entry, k.connected).unwrap_or(false);

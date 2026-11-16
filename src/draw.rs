@@ -614,12 +614,11 @@ pub fn frame<'a>(
                 name_color: ship.and_then(|s| name_color(s, gp)),
             });
             // A rostered ship whose entity has not arrived yet: the old
-            // renderer draws a full bar for allies, and for some enemies by a
-            // rule not worked out (under 1.5% of its bars on the local replays).
+            // renderer seeds it full from the arena roster's `maxHealth`.
             let fraction = match ship {
                 Some(s) if s.max_health > 0.0 => Some((s.health / s.max_health).clamp(0.0, 1.0)),
                 Some(_) => None,
-                None => (l.is_some() && rel != 2).then_some(1.0),
+                None => world.player_of(id).filter(|&p| world.players[p].max_health > 0).map(|_| 1.0),
             };
             if let Some(fraction) = fraction {
                 out.push(Draw::HealthBar {
