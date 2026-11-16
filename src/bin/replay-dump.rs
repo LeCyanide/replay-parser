@@ -130,7 +130,7 @@ fn run(cmd: &str, path: &std::path::Path, scripts: Option<&std::path::Path>) -> 
             let scripts = scripts.ok_or("needs a scripts directory")?;
             let defs = EntityDefs::load(&ScriptDir(scripts.to_path_buf()))?;
             let mut decoder = EntityDecoder::new(&defs);
-            let mut world = replay_parser::world::World::new();
+            let mut world = replay_parser::world::World::new(&replay.meta);
             let mut out = std::io::stdout().lock();
             let mut next = 0f32;
             for p in packets {

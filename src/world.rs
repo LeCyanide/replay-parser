@@ -1,6 +1,7 @@
 //! Battle world, the part the replay alone determines: ships (position,
-//! heading, health, team, alive), deaths, team scores, capture points,
-//! smoke screens and the battle clock.
+//! heading, health, team, alive, player), deaths, team scores, capture
+//! points, smoke screens, squadrons on the minimap, torpedoes, shells in
+//! flight, and the battle clock.
 //!
 //! [`World::apply`] takes each packet together with the event the
 //! [`EntityDecoder`] made of it. Where an entity's state matters, it is read
@@ -8,20 +9,37 @@
 //! updates applied, rather than re-interpreted from the event.
 
 use std::collections::BTreeMap;
+use std::collections::HashSet;
 
 use serde::Serialize;
 
+use crate::ReplayMeta;
 use crate::entity::EntityDecoder;
 use crate::entity::Event;
 use crate::packet::Decoded;
 use crate::packet::Packet;
 use crate::packet::Vec3;
+use crate::pickle;
 use crate::value::Value;
+
+/// A shell's real flight time over its `serverTimeLeft`. Measured on the
+/// fixtures from hits that land at the aim point (5th–95th percentile
+/// 0.349–0.374); `tests/world.rs` re-measures it.
+pub const SHELL_TIME_SCALE: f32 = 0.36;
+
+/// Torpedoes that run out of range normally get a kill message; a few never
+/// do (about 1 in 25 on the fixtures).
+/// shortcut: dropped at this age, about twice the longest run seen; use the
+/// torpedo's range from GameParams once step 7 lands.
+pub const TORPEDO_MAX_AGE: f32 = 150.0;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Ship {
-    /// The Avatar entity id, which is the arena info's vehicle `id`.
+    /// The owning Avatar's entity id; 0 for bots and, in some builds, for
+    /// ships first created outside the area of interest.
     pub owner: i64,
+    /// Index into [`World::players`], once the roster links it.
+    pub player: Option<usize>,
     pub team: i64,
     pub health: f32,
     pub max_health: f32,
@@ -34,6 +52,24 @@ pub struct Ship {
     /// updates for it. Raw `visibilityFlags` alongside, meaning not decoded.
     pub in_aoi: bool,
     pub visibility_flags: i64,
+}
+
+/// One arena-info vehicle entry.
+#[derive(Clone, Debug, Serialize)]
+pub struct Player {
+    pub name: String,
+    /// GameParams id of the ship.
+    pub ship_params_id: i64,
+    /// 0 = the recording player, 1 = ally, 2 = enemy.
+    pub relation: u32,
+    /// The arena info's `id`; see [`crate::meta::VehicleMeta::id`].
+    pub meta_id: i64,
+    /// Every integer in this player's `onArenaStateReceived` roster entry.
+    /// The entry's keys are version-specific indices (players and bots use
+    /// different ones), so a ship is linked by finding its Vehicle entity id
+    /// among these instead. Bots' ships have `owner` 0, so that cannot link.
+    #[serde(skip)]
+    roster: HashSet<i64>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -64,6 +100,50 @@ pub struct Smoke {
     pub points: Vec<[f32; 3]>,
 }
 
+/// A squadron as the minimap shows it.
+#[derive(Clone, Debug, Serialize)]
+pub struct Squadron {
+    pub id: u64,
+    /// The launching ship: the plane id's low 32 bits.
+    pub owner: u32,
+    pub team: i64,
+    pub params_id: i64,
+    /// World x, z.
+    pub position: [f32; 2],
+    pub seen: f32,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct Torpedo {
+    pub owner: u32,
+    pub shot_id: i64,
+    pub params_id: i64,
+    pub launched: f32,
+    /// Known position at clock `at`, moving by `velocity` per second since.
+    pub position: [f32; 3],
+    pub velocity: [f32; 3],
+    pub at: f32,
+}
+
+impl Torpedo {
+    pub fn position_at(&self, clock: f32) -> [f32; 3] {
+        let dt = clock - self.at;
+        std::array::from_fn(|i| self.position[i] + self.velocity[i] * dt)
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct Shell {
+    pub owner: u32,
+    pub shot_id: i64,
+    pub params_id: i64,
+    pub from: [f32; 3],
+    pub to: [f32; 3],
+    pub launched: f32,
+    /// Estimated landing clock; a hit before then removes the shell early.
+    pub arrives: f32,
+}
+
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct World {
     pub clock: f32,
@@ -72,9 +152,13 @@ pub struct World {
     /// Indexed by team id.
     pub scores: Vec<i64>,
     pub winner: Option<i64>,
+    pub players: Vec<Player>,
     pub ships: BTreeMap<u32, Ship>,
     pub caps: BTreeMap<u32, CapturePoint>,
     pub smokes: BTreeMap<u32, Smoke>,
+    pub squadrons: BTreeMap<u64, Squadron>,
+    pub torpedoes: Vec<Torpedo>,
+    pub shells: Vec<Shell>,
     pub deaths: Vec<Death>,
 }
 
@@ -86,47 +170,99 @@ fn f32_of(v: Option<&Value>) -> Option<f32> {
     v.and_then(Value::as_f32)
 }
 
+fn vec3(v: Option<&Value>) -> Option<[f32; 3]> {
+    match v {
+        Some(Value::Vector3(p)) => Some(*p),
+        _ => None,
+    }
+}
+
+fn list<'v, 'a>(v: Option<&'v Value<'a>>) -> &'v [Value<'a>] {
+    match v {
+        Some(Value::List(xs)) => xs,
+        _ => &[],
+    }
+}
+
+fn pickle_ints(v: &pickle::Value, out: &mut HashSet<i64>) {
+    use pickle::Value as P;
+    match v {
+        P::Int(i) => {
+            out.insert(*i);
+        }
+        P::List(xs) | P::Tuple(xs) | P::Set(xs) => xs.iter().for_each(|x| pickle_ints(x, out)),
+        P::Dict(kv) => kv.iter().for_each(|(k, x)| {
+            pickle_ints(k, out);
+            pickle_ints(x, out)
+        }),
+        P::Object { args, state, .. } => {
+            pickle_ints(args, out);
+            if let Some(s) = state {
+                pickle_ints(s, out);
+            }
+        }
+        _ => {}
+    }
+}
+
 impl World {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(meta: &ReplayMeta) -> Self {
+        let players = meta
+            .vehicles
+            .iter()
+            .map(|v| Player {
+                name: v.name.clone(),
+                ship_params_id: v.ship_id,
+                relation: v.relation,
+                meta_id: v.id,
+                roster: HashSet::new(),
+            })
+            .collect();
+        Self { players, ..Self::default() }
     }
 
     pub fn apply(&mut self, dec: &EntityDecoder, packet: &Packet, event: Option<&Event>) {
+        // The stream's final trailer packet carries clock 0; never go back.
         self.clock = self.clock.max(packet.clock);
+        let clock = self.clock;
+        self.shells.retain(|s| s.arrives > clock);
+        self.torpedoes.retain(|t| clock - t.launched < TORPEDO_MAX_AGE);
         if let Ok(decoded) = packet.decode() {
             match decoded {
                 Decoded::Position { entity_id, position, rotation, .. } => {
-                    self.moved(entity_id, position, rotation.yaw, packet.clock)
+                    self.moved(entity_id, position, rotation.yaw, clock)
                 }
                 // Relative orientations (parent_id != 0) are the camera's.
                 Decoded::PlayerOrientation { entity_id, parent_id: 0, position, rotation } => {
-                    self.moved(entity_id, position, rotation.yaw, packet.clock)
+                    self.moved(entity_id, position, rotation.yaw, clock)
                 }
                 _ => {}
             }
         }
         let Some(event) = event else { return };
-        match *event {
+        match event {
             Event::Create { entity_id, entity, position, rotation, .. } => {
-                match entity {
+                let entity_id = *entity_id;
+                match *entity {
                     "Vehicle" => {
                         let ship = self.ships.entry(entity_id).or_insert_with(|| Ship {
                             owner: 0,
+                            player: None,
                             team: -1,
                             health: 0.0,
                             max_health: 0.0,
                             alive: true,
                             position: Vec3 { x: 0.0, y: 0.0, z: 0.0 },
                             yaw: 0.0,
-                            seen: packet.clock,
+                            seen: clock,
                             in_aoi: true,
                             visibility_flags: 0,
                         });
                         ship.in_aoi = true;
                         if let (Some(p), Some(r)) = (position, rotation) {
-                            ship.position = p;
+                            ship.position = *p;
                             ship.yaw = r.yaw;
-                            ship.seen = packet.clock;
+                            ship.seen = clock;
                         }
                     }
                     "InteractiveZone" => {
@@ -136,7 +272,7 @@ impl World {
                                 entity_id,
                                 CapturePoint {
                                     index: -1,
-                                    position: p,
+                                    position: *p,
                                     radius,
                                     team: -1,
                                     progress: 0.0,
@@ -151,33 +287,160 @@ impl World {
                 self.refresh(dec, entity_id, entity);
             }
             Event::Property { entity_id, entity, .. } | Event::Nested { entity_id, entity, .. } => {
-                self.refresh(dec, entity_id, entity)
+                self.refresh(dec, *entity_id, entity)
             }
-            Event::Leave { entity_id, entity } => match entity {
+            Event::Leave { entity_id, entity } => match *entity {
                 "Vehicle" => {
-                    if let Some(s) = self.ships.get_mut(&entity_id) {
+                    if let Some(s) = self.ships.get_mut(entity_id) {
                         s.in_aoi = false;
                     }
                 }
                 // shortcut: leaving the AoI and dissipating look the same here;
                 // a smoke that re-enters is re-created by its EntityCreate.
                 "SmokeScreen" => {
-                    self.smokes.remove(&entity_id);
+                    self.smokes.remove(entity_id);
                 }
                 _ => {}
             },
-            Event::Method { method: "receiveVehicleDeath", ref args, .. } => {
-                let arg = |i: usize| args.get(i).and_then(|(_, v)| v.as_i64());
-                if let (Some(victim), Some(killer)) = (arg(0), arg(1)) {
+            Event::Method { method, args, .. } => self.method(method, args, clock),
+        }
+    }
+
+    fn method(&mut self, method: &str, args: &[(&str, Value)], clock: f32) {
+        let arg = |i: usize| args.get(i).map(|(_, v)| v);
+        let int = |i: usize| i64_of(arg(i));
+        match method {
+            "receiveVehicleDeath" => {
+                if let (Some(victim), Some(killer)) = (int(0), int(1)) {
                     let (victim, killer) = (victim as u32, killer as u32);
-                    self.deaths.push(Death { clock: packet.clock, victim, killer, reason: arg(2).unwrap_or(-1) });
+                    self.deaths.push(Death { clock, victim, killer, reason: int(2).unwrap_or(-1) });
                     if let Some(s) = self.ships.get_mut(&victim) {
                         s.alive = false;
                     }
                 }
             }
-            Event::Method { .. } => {}
+            "onArenaStateReceived" => {
+                for (name, v) in args {
+                    let ("playersStates" | "botsStates", Value::Blob(b)) = (*name, v) else { continue };
+                    // An unreadable roster leaves ships unlinked, not the world broken.
+                    let Ok(pickle::Value::List(entries)) = pickle::from_slice(b) else { continue };
+                    for entry in &entries {
+                        let mut ints = HashSet::new();
+                        pickle_ints(entry, &mut ints);
+                        if let Some(p) = self
+                            .players
+                            .iter_mut()
+                            .find(|p| ints.contains(&p.meta_id) && ints.contains(&p.ship_params_id))
+                        {
+                            p.roster = ints;
+                        }
+                    }
+                }
+                let ids: Vec<u32> = self.ships.keys().copied().collect();
+                ids.into_iter().for_each(|id| self.link(id));
+            }
+            "receive_addMinimapSquadron" => {
+                let (Some(id), Some(Value::Vector2(p))) = (int(0), arg(3)) else { return };
+                let id = id as u64;
+                self.squadrons.insert(
+                    id,
+                    Squadron {
+                        id,
+                        owner: id as u32,
+                        team: int(1).unwrap_or(-1),
+                        params_id: int(2).unwrap_or(0),
+                        position: *p,
+                        seen: clock,
+                    },
+                );
+            }
+            "receive_updateMinimapSquadron" => {
+                let (Some(id), Some(Value::Vector2(p))) = (int(0), arg(1)) else { return };
+                if let Some(s) = self.squadrons.get_mut(&(id as u64)) {
+                    s.position = *p;
+                    s.seen = clock;
+                }
+            }
+            "receive_removeMinimapSquadron" => {
+                if let Some(id) = int(0) {
+                    self.squadrons.remove(&(id as u64));
+                }
+            }
+            "receiveTorpedoes" => {
+                for pack in list(arg(0)) {
+                    let owner = i64_of(pack.get("ownerID")).unwrap_or(0) as u32;
+                    let params_id = i64_of(pack.get("paramsID")).unwrap_or(0);
+                    for t in list(pack.get("torpedoes")) {
+                        let (Some(position), Some(velocity), Some(shot_id)) =
+                            (vec3(t.get("pos")), vec3(t.get("dir")), i64_of(t.get("shotID")))
+                        else {
+                            continue;
+                        };
+                        self.torpedoes.push(Torpedo {
+                            owner,
+                            shot_id,
+                            params_id,
+                            launched: clock,
+                            position,
+                            velocity,
+                            at: clock,
+                        });
+                    }
+                }
+            }
+            // A course change: new position and yaw, same speed.
+            "receiveTorpedoDirection" | "receiveTorpedoManeuverEnd" => {
+                let (Some(owner), Some(shot_id), Some(pos), Some(yaw)) = (int(0), int(1), vec3(arg(2)), f32_of(arg(3)))
+                else {
+                    return;
+                };
+                if let Some(t) = self.torpedo(owner as u32, shot_id) {
+                    let speed = t.velocity[0].hypot(t.velocity[2]);
+                    t.position = pos;
+                    t.velocity = [speed * yaw.sin(), 0.0, speed * yaw.cos()];
+                    t.at = clock;
+                }
+            }
+            "receiveTorpedoSynchronization" => {
+                let (Some(owner), Some(shot_id), Some(pos)) = (int(0), int(1), vec3(arg(2))) else { return };
+                if let Some(t) = self.torpedo(owner as u32, shot_id) {
+                    t.position = pos;
+                    t.at = clock;
+                }
+            }
+            "receiveArtilleryShots" => {
+                for pack in list(arg(0)) {
+                    let owner = i64_of(pack.get("ownerID")).unwrap_or(0) as u32;
+                    let params_id = i64_of(pack.get("paramsID")).unwrap_or(0);
+                    for s in list(pack.get("shots")) {
+                        let (Some(from), Some(to), Some(shot_id), Some(left)) = (
+                            vec3(s.get("pos")),
+                            vec3(s.get("tarPos")),
+                            i64_of(s.get("shotID")),
+                            f32_of(s.get("serverTimeLeft")),
+                        ) else {
+                            continue;
+                        };
+                        let arrives = clock + left * SHELL_TIME_SCALE;
+                        self.shells.push(Shell { owner, shot_id, params_id, from, to, launched: clock, arrives });
+                    }
+                }
+            }
+            "receiveShotKills" => {
+                for pack in list(arg(0)) {
+                    let owner = i64_of(pack.get("ownerID")).unwrap_or(0) as u32;
+                    let ids: HashSet<i64> =
+                        list(pack.get("kills")).iter().filter_map(|k| i64_of(k.get("shotID"))).collect();
+                    self.shells.retain(|s| !(s.owner == owner && ids.contains(&s.shot_id)));
+                    self.torpedoes.retain(|t| !(t.owner == owner && ids.contains(&t.shot_id)));
+                }
+            }
+            _ => {}
         }
+    }
+
+    fn torpedo(&mut self, owner: u32, shot_id: i64) -> Option<&mut Torpedo> {
+        self.torpedoes.iter_mut().find(|t| t.owner == owner && t.shot_id == shot_id)
     }
 
     fn moved(&mut self, entity_id: u32, position: Vec3, yaw: f32, clock: f32) {
@@ -185,6 +448,14 @@ impl World {
             s.position = position;
             s.yaw = yaw;
             s.seen = clock;
+        }
+    }
+
+    /// Links a ship to its player once both the ship and the roster are known.
+    fn link(&mut self, id: u32) {
+        let Some(s) = self.ships.get_mut(&id) else { return };
+        if s.player.is_none() {
+            s.player = self.players.iter().position(|p| p.roster.contains(&i64::from(id)));
         }
     }
 
@@ -203,6 +474,7 @@ impl World {
                 if i64_of(prop("isAlive")) == Some(0) {
                     s.alive = false;
                 }
+                self.link(id);
             }
             "BattleLogic" => {
                 self.time_left = i64_of(prop("timeLeft")).or(self.time_left);
@@ -229,12 +501,7 @@ impl World {
             }
             "SmokeScreen" => {
                 let radius = f32_of(prop("bcRadius")).or(f32_of(prop("radius"))).unwrap_or(0.0);
-                let points = match prop("points") {
-                    Some(Value::List(ps)) => {
-                        ps.iter().filter_map(|p| if let Value::Vector3(v) = p { Some(*v) } else { None }).collect()
-                    }
-                    _ => Vec::new(),
-                };
+                let points = list(prop("points")).iter().filter_map(|p| vec3(Some(p))).collect();
                 self.smokes.insert(id, Smoke { radius, points });
             }
             _ => {}

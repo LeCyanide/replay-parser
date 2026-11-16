@@ -9,7 +9,6 @@ use replay_parser::defs::ScriptDir;
 use replay_parser::entity::EntityDecoder;
 use replay_parser::entity::Event;
 use replay_parser::packet::Packets;
-use replay_parser::pickle;
 use replay_parser::value::Value;
 use replay_parser::world::World;
 
@@ -17,26 +16,13 @@ fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
 }
 
-/// All integers anywhere in a pickled value.
-fn ints(v: &pickle::Value, out: &mut HashSet<i64>) {
-    use pickle::Value as P;
-    match v {
-        P::Int(i) => {
-            out.insert(*i);
-        }
-        P::List(xs) | P::Tuple(xs) | P::Set(xs) => xs.iter().for_each(|x| ints(x, out)),
-        P::Dict(kv) => kv.iter().for_each(|(k, x)| {
-            ints(k, out);
-            ints(x, out)
-        }),
-        P::Object { args, state, .. } => {
-            ints(args, out);
-            if let Some(s) = state {
-                ints(s, out);
-            }
-        }
-        _ => {}
-    }
+fn on_map(xs: &[f32]) -> bool {
+    xs.iter().all(|c| c.is_finite() && c.abs() < 1500.0)
+}
+
+fn median(mut xs: Vec<f32>) -> f32 {
+    xs.sort_by(f32::total_cmp);
+    xs[xs.len() / 2]
 }
 
 #[test]
@@ -50,6 +36,7 @@ fn world_is_consistent_on_every_fixture() {
     files.sort();
     assert!(!files.is_empty(), "run scripts/fetch-fixtures.sh");
 
+    let (mut total_squadrons, mut total_torpedoes, mut total_aimed_hits) = (0usize, 0usize, 0usize);
     for path in files {
         let name = path.file_name().unwrap().to_string_lossy().into_owned();
         let replay = Replay::from_file(&path).unwrap();
@@ -58,31 +45,59 @@ fn world_is_consistent_on_every_fixture() {
         assert!(scripts.is_dir(), "no entity defs at {}; run scripts/fetch-entity-defs.sh", scripts.display());
         let defs = EntityDefs::load(&ScriptDir(scripts)).unwrap();
         let mut dec = EntityDecoder::new(&defs);
-        let mut world = World::new();
+        let mut world = World::new(&replay.meta);
         let mut cap_progress_seen = false;
-        let mut rosters: Vec<HashSet<i64>> = Vec::new();
+        let (mut squadrons, mut torpedoes, mut shells) = (0usize, 0usize, 0usize);
+        // How far dead reckoning drifts before each torpedo sync.
+        let mut torpedo_drift = Vec::new();
+        // Shell hits at the aim point: elapsed time over predicted flight time.
+        let mut shell_timing = Vec::new();
+        let mut squadron_owners = HashSet::new();
 
         for p in Packets::new(&replay.packets, v) {
             let event = dec.feed(&p).unwrap();
-            world.apply(&dec, &p, event.as_ref());
-            if let Some(Event::Method { method: "onArenaStateReceived", args, .. }) = &event {
-                for (arg, v) in args {
-                    if let ("playersStates" | "botsStates", Value::Blob(b)) = (*arg, v) {
-                        let pickle::Value::List(entries) = pickle::from_slice(b).unwrap() else { panic!("{name}") };
-                        rosters.extend(entries.iter().map(|e| {
-                            let mut s = HashSet::new();
-                            ints(e, &mut s);
-                            s
-                        }));
+            if let Some(Event::Method { method, args, .. }) = &event {
+                let arg = |i: usize| args.get(i).map(|(_, v)| v);
+                match *method {
+                    "receiveTorpedoSynchronization" => {
+                        let (owner, shot) = (arg(0).unwrap().as_i64().unwrap(), arg(1).unwrap().as_i64().unwrap());
+                        let Some(Value::Vector3(at)) = arg(2) else { panic!("{name}: sync pos") };
+                        if let Some(t) =
+                            world.torpedoes.iter().find(|t| i64::from(t.owner) == owner && t.shot_id == shot)
+                        {
+                            let q = t.position_at(world.clock);
+                            torpedo_drift.push((q[0] - at[0]).hypot(q[2] - at[2]));
+                        }
                     }
+                    "receiveShotKills" => {
+                        let Some(Value::List(packs)) = arg(0) else { panic!("{name}: kills") };
+                        for pack in packs {
+                            let owner = pack.get("ownerID").unwrap().as_i64().unwrap();
+                            let Some(Value::List(kills)) = pack.get("kills") else { continue };
+                            for k in kills {
+                                let shot = k.get("shotID").unwrap().as_i64().unwrap();
+                                let Some(Value::Vector3(at)) = k.get("pos") else { continue };
+                                let Some(s) =
+                                    world.shells.iter().find(|s| i64::from(s.owner) == owner && s.shot_id == shot)
+                                else {
+                                    continue;
+                                };
+                                let aimed = (s.to[0] - s.from[0]).hypot(s.to[2] - s.from[2]);
+                                let hit = (at[0] - s.from[0]).hypot(at[2] - s.from[2]);
+                                if aimed > 100.0 && (hit - aimed).abs() < 0.03 * aimed {
+                                    shell_timing.push((p.clock - s.launched) / (s.arrives - s.launched));
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
+            world.apply(&dec, &p, event.as_ref());
+
             for s in world.ships.values() {
                 let pos = s.position;
-                assert!(
-                    [pos.x, pos.z].iter().all(|c| c.is_finite() && c.abs() < 1500.0),
-                    "{name}: ship off the map at {pos:?}"
-                );
+                assert!(on_map(&[pos.x, pos.z]), "{name}: ship off the map at {pos:?}");
                 assert!(s.health >= 0.0 && s.health <= s.max_health, "{name}: health {}/{}", s.health, s.max_health);
             }
             for c in world.caps.values() {
@@ -92,17 +107,38 @@ fn world_is_consistent_on_every_fixture() {
             for s in world.smokes.values() {
                 assert!(!s.points.is_empty() && s.radius > 0.0, "{name}: empty smoke");
             }
+            for s in world.squadrons.values() {
+                // The owner may not have entered the area of interest yet.
+                squadron_owners.insert(s.owner);
+                assert!(on_map(&s.position), "{name}: squadron off the map");
+            }
+            for t in &world.torpedoes {
+                assert!(on_map(&t.position_at(world.clock)), "{name}: torpedo off the map at {}: {t:?}", world.clock);
+            }
+            squadrons = squadrons.max(world.squadrons.len());
+            torpedoes = torpedoes.max(world.torpedoes.len());
+            shells = shells.max(world.shells.len());
         }
 
-        // Every arena-info vehicle is a ship on team 0/1, linked through the
-        // roster entry that holds both its arena-info id and the ship's owner.
-        for m in &replay.meta.vehicles {
-            let entry = rosters.iter().find(|r| r.contains(&m.id) && r.contains(&m.ship_id));
-            let entry = entry.unwrap_or_else(|| panic!("{name}: no roster entry for {}", m.id));
-            let ship = world.ships.values().find(|s| entry.contains(&s.owner));
-            let ship = ship.unwrap_or_else(|| panic!("{name}: no ship for player {}", m.id));
-            assert!((0..=1).contains(&ship.team), "{name}: team {}", ship.team);
+        // Every arena-info player is linked to exactly one ship, on team 0/1,
+        // and allies share the recording player's team.
+        let mut linked = HashSet::new();
+        for (i, pl) in world.players.iter().enumerate() {
+            let ships: Vec<_> = world.ships.values().filter(|s| s.player == Some(i)).collect();
+            assert_eq!(ships.len(), 1, "{name}: player {} has {} ships", pl.name, ships.len());
+            assert!((0..=1).contains(&ships[0].team), "{name}: team {}", ships[0].team);
+            linked.insert(i);
         }
+        let team_of = |rel: u32| {
+            let i = world.players.iter().position(|p| p.relation == rel)?;
+            world.ships.values().find(|s| s.player == Some(i)).map(|s| s.team)
+        };
+        let own = team_of(0).unwrap_or_else(|| panic!("{name}: no recording player"));
+        for (i, pl) in world.players.iter().enumerate() {
+            let team = world.ships.values().find(|s| s.player == Some(i)).unwrap().team;
+            assert_eq!(team == own, pl.relation < 2, "{name}: {} relation {} on team {team}", pl.name, pl.relation);
+        }
+
         // Deaths and the alive flags agree, and each ship dies at most once.
         let victims: HashSet<u32> = world.deaths.iter().map(|d| d.victim).collect();
         assert_eq!(victims.len(), world.deaths.len(), "{name}: a ship died twice");
@@ -112,10 +148,35 @@ fn world_is_consistent_on_every_fixture() {
             world.deaths.iter().all(|d| world.ships.contains_key(&d.killer) || d.killer == 0),
             "{name}: unknown killer"
         );
-        // Positions keep coming for most of the battle.
         assert!(world.ships.values().any(|s| s.seen > world.clock - 60.0), "{name}: positions stopped");
         assert_eq!(world.scores.len(), 2, "{name}: scores {:?}", world.scores);
         assert!(world.winner.is_some(), "{name}: no battle result");
         assert!(!world.caps.is_empty() && cap_progress_seen, "{name}: caps never moved");
+        // Squadron owners (plane id low 32 bits) are ships of this battle,
+        // allowing the few that never enter the recording player's view.
+        let unknown = squadron_owners.iter().filter(|o| !world.ships.contains_key(o)).count();
+        assert!(
+            unknown * 4 <= squadron_owners.len(),
+            "{name}: {unknown} of {} squadron owners unknown",
+            squadron_owners.len()
+        );
+        assert!(shells > 0, "{name}: no shells");
+        total_squadrons += squadrons;
+        total_torpedoes += torpedoes;
+
+        // Dead reckoning stays within a few world units between syncs.
+        if !torpedo_drift.is_empty() {
+            let worst = torpedo_drift.iter().copied().fold(0.0, f32::max);
+            assert!(median(torpedo_drift.clone()) < 1.0 && worst < 10.0, "{name}: torpedo drift up to {worst}");
+        }
+        // Shells landing at their aim point arrive close to the predicted time.
+        if shell_timing.len() >= 20 {
+            let m = median(shell_timing.clone());
+            assert!((0.95..1.05).contains(&m), "{name}: shells land at {m} of predicted flight");
+        }
+        total_aimed_hits += shell_timing.len();
     }
+    // Not every battle has carriers or torpedo boats, but the corpus does.
+    assert!(total_squadrons > 0 && total_torpedoes > 0, "no squadrons or torpedoes in any fixture");
+    assert!(total_aimed_hits > 500, "only {total_aimed_hits} aimed shell hits checked");
 }

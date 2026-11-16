@@ -53,12 +53,18 @@ the same output, built on this crate instead.
    and checked here on the fixtures; what needs GameParams (ranges, shell
    flight times, plane icons) waits for step 7.
    *Started* (`world`): ship position/heading, health, team, alive and
-   area-of-interest, deaths with killer and reason code, team scores, battle
+   area-of-interest; each ship's arena-info player (by its Vehicle entity
+   id, which every `onArenaStateReceived` roster entry holds, for players
+   and bots alike); deaths with killer and reason code; team scores, battle
    result, capture points (owner, progress, invader), smoke screens, clock
-   and battle stage. Not yet: interpolation, decoding `visibilityFlags`,
-   shells, torpedoes, squadrons, buildings, weather, consumables, and linking
-   ships to arena-info players (the arena info's `id` is the Avatar id only
-   in some builds; the `onArenaStateReceived` roster links them).
+   and battle stage; minimap squadrons (the plane id's low 32 bits are the
+   owning ship); torpedoes, dead-reckoned between course changes and syncs;
+   shells in flight from muzzle to aim point, landing at
+   `0.36 × serverTimeLeft` (measured; see Tests).
+   Not yet: interpolation, decoding `visibilityFlags` and the packed
+   `updateMinimapVisionInfo` positions (minimap-only spotting), secondary
+   shells, buildings, weather, consumables. Torpedoes that never get a kill
+   message are dropped at 150 s until GameParams gives their range.
 9. **Draw-command emitter** 🖥 — world state → the existing `format.rs` record
    tags (`SHIP`, `HEALTH_BAR`, `SHOT_TRACER`, `TORPEDO`, `SMOKE`, `PLANE`,
    `CAPTURE_POINT`, …).
@@ -122,10 +128,16 @@ On every fixture:
 
 The world (`tests/world.rs`), at every packet of every fixture: ships stay
 on the map with health within max, capture progress stays in 0–1, smokes
-have points and a radius; at the end, every arena-info vehicle maps through
-its roster entry to a ship on team 0/1, the ships marked dead are exactly
-the `receiveVehicleDeath` victims (each dying once), killers are known
-ships, there are two team scores and a battle result, and a cap moved.
+have points and a radius, squadrons and torpedoes stay on the map; at the
+end, every arena-info player is linked to exactly one ship, on team 0/1,
+with allies on the recording player's team and enemies not; the ships
+marked dead are exactly the `receiveVehicleDeath` victims (each dying
+once), killers are known ships, there are two team scores and a battle
+result, a cap moved, and most squadron owners are ships of the battle.
+Torpedo dead reckoning is compared with every `receiveTorpedoSynchronization`
+(median drift under 1 unit, worst under 10). Shells that hit at their aim
+point (about 3,400 across the fixtures) land at 0.95–1.05 of the predicted
+flight time, median per replay.
 
 The pickle reader is checked against CPython on `tests/pickle_corpus.json`
 (regenerate with `python3 -I scripts/gen-pickle-corpus.py`).
