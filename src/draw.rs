@@ -7,6 +7,7 @@
 //! Positions are minimap pixels on a [`MINIMAP_SIZE`] square, y down; radii
 //! are pixels too.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
@@ -81,10 +82,19 @@ pub struct Label {
     pub species: Option<String>,
 }
 
+/// Labels for a replay: per arena-info player, plus species by ship params
+/// id for ships with no player (bots spawned mid-battle).
+#[derive(Clone, Debug, Default)]
+pub struct Labels {
+    pub players: Vec<Label>,
+    pub species: HashMap<i64, String>,
+}
+
 /// Labels for [`World::players`], by index. `names` is the gettext
 /// catalogue: ship names are `IDS_<ship index>`, and bots' names are keys too.
-pub fn labels(players: &[Player], gp: Option<&GameParams>, names: &HashMap<String, String>) -> Vec<Label> {
-    players
+pub fn labels(players: &[Player], gp: Option<&GameParams>, names: &HashMap<String, String>) -> Labels {
+    let species = gp.map(|gp| gp.ships.values().map(|s| (s.id, s.species.clone())).collect()).unwrap_or_default();
+    let players = players
         .iter()
         .map(|p| {
             let ship = gp.and_then(|gp| gp.ships.get(&p.ship_params_id));
@@ -98,7 +108,8 @@ pub fn labels(players: &[Player], gp: Option<&GameParams>, names: &HashMap<Strin
                 species: ship.map(|s| s.species.clone()),
             }
         })
-        .collect()
+        .collect();
+    Labels { players, species }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
@@ -127,7 +138,7 @@ pub enum Draw<'a> {
     Ship {
         entity_id: u32,
         pos: [f32; 2],
-        /// World yaw (0 along +z, counter-clockwise from above is negative).
+        /// Screen angle: π/2 − world yaw (0 points east, π/2 north).
         yaw: f32,
         species: Option<&'a str>,
         /// None while undetected.
@@ -136,7 +147,8 @@ pub enum Draw<'a> {
         opacity: f32,
         is_self: bool,
         player_name: Option<&'a str>,
-        ship_name: Option<&'a str>,
+        /// With the submarine depth appended (" (Scope)", " (30m)", …).
+        ship_name: Option<Cow<'a, str>>,
         /// An ally (or the recording player) the enemy currently spots.
         is_detected_teammate: bool,
     },
@@ -187,21 +199,40 @@ fn hp_color(fraction: f32) -> [u8; 3] {
     }
 }
 
+/// Depth suffix the renderer appends to a submarine's name.
+fn depth(buoyancy: i64) -> Option<&'static str> {
+    Some(match buoyancy {
+        1 => " (Scope)",
+        2 => " (30m)",
+        3 => " (60m)",
+        4 => " (60m*)",
+        _ => return None,
+    })
+}
+
 /// One frame at `clock` (torpedoes are dead-reckoned to it). `labels` is
 /// [`labels`] for this world's players.
 ///
 /// Not yet, against the renderer: division mates' gold colour, the
 /// disconnected flag, name colours by loaded ammo, submarine depth in the
 /// ship name, position interpolation between packets.
-pub fn frame<'a>(world: &World, map: &MapGeometry, labels: &'a [Label], clock: f32) -> Vec<Draw<'a>> {
+pub fn frame<'a>(world: &World, map: &MapGeometry, labels: &'a Labels, clock: f32) -> Vec<Draw<'a>> {
     let mut out = Vec::new();
     let own = world.own_team();
     let relation = |id: u32| world.player_of(id).map(|p| world.players[p].relation);
-    let label = |id: u32| world.player_of(id).and_then(|p| labels.get(p));
+    let label = |id: u32| world.player_of(id).and_then(|p| labels.players.get(p));
+    let species = |id: u32| {
+        label(id).and_then(|l| l.species.as_deref()).or_else(|| {
+            let params = world.ships.get(&id)?.params_id;
+            labels.species.get(&params).map(String::as_str)
+        })
+    };
+    let screen = |yaw: f32| std::f32::consts::FRAC_PI_2 - yaw;
 
-    for c in world.caps.values().filter(|c| c.enabled) {
+    // Zones without a control point (arms-race buffs, …) are not caps.
+    for c in world.caps.values().filter(|c| c.enabled && c.index >= 0) {
         let label = match c.kind {
-            1 | 2 | 4 => "\u{2691}".to_owned(),
+            2 | 3 | 5 => "\u{2691}".to_owned(),
             _ => char::from(b'A' + c.index.clamp(0, 25) as u8).to_string(),
         };
         out.push(Draw::CapturePoint {
@@ -239,10 +270,12 @@ pub fn frame<'a>(world: &World, map: &MapGeometry, labels: &'a [Label], clock: f
         let sighting = world.minimap.get(&id);
         let rel = relation(id).unwrap_or(2);
         let l = label(id);
-        let species = l.and_then(|l| l.species.as_deref());
-        let yaw = sighting.map(|m| m.yaw).or(ship.map(|s| s.yaw)).unwrap_or(0.0);
+        let species = species(id);
+        let yaw = screen(sighting.map(|m| m.yaw).or(ship.map(|s| s.yaw)).unwrap_or(0.0));
         if sighting.is_some_and(|m| m.visible) {
+            // Outside the area of interest the world position is stale.
             let pos = match (ship, sighting) {
+                (Some(s), Some(m)) if !s.in_aoi => map.px(m.position[0], m.position[1]),
                 (Some(s), _) => map.px(s.position.x, s.position.z),
                 (None, Some(m)) => map.px(m.position[0], m.position[1]),
                 (None, None) => unreachable!(),
@@ -257,11 +290,21 @@ pub fn frame<'a>(world: &World, map: &MapGeometry, labels: &'a [Label], clock: f
                 opacity: 1.0,
                 is_self: rel == 0,
                 player_name: l.map(|l| l.player.as_str()),
-                ship_name: l.and_then(|l| l.ship.as_deref()),
+                ship_name: l.and_then(|l| l.ship.as_deref()).map(|n| match ship.and_then(|s| depth(s.buoyancy)) {
+                    Some(d) => Cow::Owned(format!("{n}{d}")),
+                    None => Cow::Borrowed(n),
+                }),
                 is_detected_teammate: rel != 2 && ship.is_some_and(|s| s.spotted()),
             });
-            if let Some(s) = ship.filter(|s| s.max_health > 0.0) {
-                let fraction = (s.health / s.max_health).clamp(0.0, 1.0);
+            // A rostered ship whose entity has not arrived yet: the old
+            // renderer draws a full bar for allies, and for some enemies by a
+            // rule not worked out (under 1.5% of its bars on the local replays).
+            let fraction = match ship {
+                Some(s) if s.max_health > 0.0 => Some((s.health / s.max_health).clamp(0.0, 1.0)),
+                Some(_) => None,
+                None => (l.is_some() && rel != 2).then_some(1.0),
+            };
+            if let Some(fraction) = fraction {
                 out.push(Draw::HealthBar {
                     entity_id: id,
                     pos,
@@ -299,8 +342,8 @@ pub fn frame<'a>(world: &World, map: &MapGeometry, labels: &'a [Label], clock: f
         out.push(Draw::DeadShip {
             entity_id: d.victim,
             pos,
-            yaw: sighting.map(|m| m.yaw).or(ship.map(|s| s.yaw)).unwrap_or(0.0),
-            species: l.and_then(|l| l.species.as_deref()),
+            yaw: screen(sighting.map(|m| m.yaw).or(ship.map(|s| s.yaw)).unwrap_or(0.0)),
+            species: species(d.victim),
             is_self: relation(d.victim) == Some(0),
             player_name: l.map(|l| l.player.as_str()),
             ship_name: l.and_then(|l| l.ship.as_deref()),

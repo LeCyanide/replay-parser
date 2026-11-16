@@ -168,6 +168,12 @@ fn installed_builds_decode_their_replays() {
                     }
                 }
             }
+            // shipConfig names the same ship as the arena info.
+            for s in world.ships.values() {
+                if let Some(p) = s.player {
+                    assert_eq!(s.params_id, world.players[p].ship_params_id, "{name}: shipConfig ship id");
+                }
+            }
             for (i, pl) in world.players.iter().enumerate() {
                 let n = world.ships.values().filter(|s| s.player == Some(i)).count();
                 // Allies are always in view; an enemy the recording player

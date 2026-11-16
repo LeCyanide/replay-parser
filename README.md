@@ -102,11 +102,24 @@ the same output, built on this crate instead.
    (detected from the minimap entry, else drawn at the last known minimap
    position, faded and unnamed), `HEALTH_BAR` and `DEAD_SHIP`; labels
    (player, ship and species names) from GameParams and the catalogue.
-   `replay-dump draw <replay> <game dir>` prints a frame per second. Not
-   yet: tracers, planes, patrol and consumable circles, camera direction,
-   buildings, weather; division gold, the disconnected flag, ammo name
-   colours, submarine depth, interpolation between packets. The sidecar
-   does not use it yet, so the diff harness (10) has not compared it.
+   `replay-dump draw <replay> <game dir>` prints a frame per second.
+   The suite's sidecar bakes with it via `bake --engine parser` (branch
+   `claude/keen-hawking-k8h8pf` of tactics-suite). Diffed against the
+   toolkit bake (10) on five local 15.10 replays (two Operations, three
+   randoms): same frame count, and `CAPTURE_POINT`, `SMOKE` and
+   `DEAD_SHIP` match on every record (9 dead-ship positions aside);
+   `SHIP` pairs on every record with positions, yaw, species, names and
+   colours matching, differing only in the ammo name colour and the
+   disconnected flag, both not built yet; `HEALTH_BAR` matches except
+   0.4–1.7% of bars the toolkit draws for enemies before their entity
+   exists (rule not worked out; allies get a full bar from the roster);
+   `TORPEDO` matches on the randoms, and differs on Operations where the
+   toolkit freezes homing torpedoes that the server's own
+   `receiveTorpedoDirection` positions show moving. Torpedoes launched
+   with a turn (`maneuverDump`) run on `targetYaw` from launch (syncs
+   agree to 0.2 units). Not yet: tracers, planes, patrol and consumable
+   circles, camera direction, buildings, buff zones, weather; division
+   gold, interpolation between packets.
 10. **Parity harness** — done, in the suite: `npm run diff-timeline -- old.wtreply
     new.wtreply`. Running it needs bakes from both sidecars (🖥).
 11. **Patch survey** ☁ — `replay-dump stats` (packet level) and
@@ -116,9 +129,8 @@ the same output, built on this crate instead.
     `sidecar/patches/`, and the toolkit's licence entries; keep credit for the
     format knowledge.
 
-Next: a `bake` in the sidecar built on `draw`, so 10 can diff the tags done
-so far against today's bakes; then the remaining tags in 9 one at a time,
-each checked with 10; buildings in 8 (none in the fixtures; Operations
+Next: the remaining tags in 9 one at a time, each checked with 10 (tracers
+first: the most records); buildings in 8 (none in the fixtures; Operations
 replays have them).
 
 ## Usage

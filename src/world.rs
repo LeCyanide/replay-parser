@@ -61,6 +61,12 @@ pub struct Ship {
     /// Active consumables: (consumable type, clock it ends). Types are the
     /// game's `CONSUMABLE_ID`s; names need GameParams-era tables.
     pub consumables: Vec<(i64, f32)>,
+    /// GameParams id of the ship, from `shipConfig` (0 until known); bots
+    /// spawned mid-battle have no arena-info player to give it.
+    pub params_id: i64,
+    /// `buoyancyCurrentState`: 0 surface, 1 periscope, 2 30 m, 3 60 m,
+    /// 4 60 m and invulnerable.
+    pub buoyancy: i64,
 }
 
 impl Ship {
@@ -133,8 +139,8 @@ pub struct CapturePoint {
     pub has_invaders: bool,
     /// `captureLogic.isEnabled`; disabled zones are not drawn.
     pub enabled: bool,
-    /// `controlPoint.type`: 0 control, 1 base, 2 mega base, 3 building,
-    /// 4 base with points, 5 epicenter.
+    /// `controlPoint.type`: 1 control, 2 base, 3 mega base, 4 building,
+    /// 5 base with points, 6 epicenter (the client's CONTROL_POINT_TYPE).
     pub kind: i64,
 }
 
@@ -390,6 +396,8 @@ impl World {
                             in_aoi: true,
                             visibility_flags: 0,
                             consumables: Vec::new(),
+                            params_id: 0,
+                            buoyancy: 0,
                         });
                         ship.in_aoi = true;
                         if let (Some(p), Some(r)) = (position, rotation) {
@@ -585,11 +593,19 @@ impl World {
                     let owner = i64_of(pack.get("ownerID")).unwrap_or(0) as u32;
                     let params_id = i64_of(pack.get("paramsID")).unwrap_or(0);
                     for t in list(pack.get("torpedoes")) {
-                        let (Some(position), Some(velocity), Some(shot_id)) =
+                        let (Some(position), Some(mut velocity), Some(shot_id)) =
                             (vec3(t.get("pos")), vec3(t.get("dir")), i64_of(t.get("shotID")))
                         else {
                             continue;
                         };
+                        // A torpedo launched with a turn (`maneuverDump`) settles on
+                        // `targetYaw` within a fraction of a second (`yawSpeed`
+                        // ≈ 2.3 rad/s); position syncs 1.3 s in agree with running
+                        // on it from launch to 0.2 units, against 1.5 straight.
+                        if let Some(yaw) = t.get("maneuverDump").and_then(|m| f32_of(m.get("targetYaw"))) {
+                            let speed = velocity[0].hypot(velocity[2]);
+                            velocity = [speed * yaw.sin(), velocity[1], speed * yaw.cos()];
+                        }
                         self.torpedoes.push(Torpedo {
                             owner,
                             shot_id,
@@ -685,6 +701,16 @@ impl World {
                 s.health = f32_of(prop("health")).unwrap_or(s.health);
                 s.max_health = f32_of(prop("maxHealth")).unwrap_or(s.max_health);
                 s.visibility_flags = i64_of(prop("visibilityFlags")).unwrap_or(s.visibility_flags);
+                s.buoyancy = i64_of(prop("buoyancyCurrentState")).unwrap_or(s.buoyancy);
+                // shipConfig: u32 version, then the ship's GameParams id. Older
+                // builds send a dict with `shipId` instead.
+                match prop("shipConfig") {
+                    Some(Value::Blob(b)) if b.len() >= 8 => {
+                        s.params_id = i64::from(u32::from_le_bytes([b[4], b[5], b[6], b[7]]))
+                    }
+                    Some(c) => s.params_id = i64_of(c.get("shipId")).unwrap_or(s.params_id),
+                    None => {}
+                }
                 // A death is final even if a later isAlive arrives out of order.
                 if i64_of(prop("isAlive")) == Some(0) {
                     s.alive = false;
@@ -718,7 +744,9 @@ impl World {
                 c.kind = i64_of(cp.and_then(|p| p.get("type"))).unwrap_or(c.kind);
             }
             "SmokeScreen" => {
-                let radius = f32_of(prop("bcRadius")).or(f32_of(prop("radius"))).unwrap_or(0.0);
+                // `bcRadius` is a bounding circle that grows with the screen; each
+                // point's puff is `radius`.
+                let radius = f32_of(prop("radius")).or(f32_of(prop("bcRadius"))).unwrap_or(0.0);
                 let points = list(prop("points")).iter().filter_map(|p| vec3(Some(p))).collect();
                 self.smokes.insert(id, Smoke { radius, points });
             }
