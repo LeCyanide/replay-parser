@@ -7,6 +7,8 @@
 //!       entity-level decode coverage, with the first failure of each kind
 //!   replay-dump events <file.wowsreplay> <scripts dir>
 //!       one JSON line per decoded entity event
+//!   replay-dump world <file.wowsreplay> <scripts dir>
+//!       one JSON world snapshot per second of game clock
 
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -42,7 +44,7 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (Some(cmd), Some(path)) = (args.first(), args.get(1)) else {
         eprintln!(
-            "usage: replay-dump <meta|stats|packets> <file.wowsreplay>\n       replay-dump <entities|events> <file.wowsreplay> <scripts dir>"
+            "usage: replay-dump <meta|stats|packets> <file.wowsreplay>\n       replay-dump <entities|events|world> <file.wowsreplay> <scripts dir>"
         );
         std::process::exit(2);
     };
@@ -123,6 +125,24 @@ fn run(cmd: &str, path: &std::path::Path, scripts: Option<&std::path::Path>) -> 
                     println!("{n:>7}  {k}\n         first: {first}");
                 }
             }
+        }
+        "world" => {
+            let scripts = scripts.ok_or("needs a scripts directory")?;
+            let defs = EntityDefs::load(&ScriptDir(scripts.to_path_buf()))?;
+            let mut decoder = EntityDecoder::new(&defs);
+            let mut world = replay_parser::world::World::new();
+            let mut out = std::io::stdout().lock();
+            let mut next = 0f32;
+            for p in packets {
+                // Undecodable packets still move the clock and positions.
+                let event = decoder.feed(&p).ok().flatten();
+                world.apply(&decoder, &p, event.as_ref());
+                if world.clock >= next {
+                    writeln!(out, "{}", serde_json::to_string(&world)?)?;
+                    next = world.clock.floor() + 1.0;
+                }
+            }
+            writeln!(out, "{}", serde_json::to_string(&world)?)?;
         }
         other => return Err(format!("unknown command {other:?}").into()),
     }

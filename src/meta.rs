@@ -47,7 +47,9 @@ pub struct VehicleMeta {
     pub ship_id: i64,
     /// 0 = the recording player, 1 = ally, 2 = enemy.
     pub relation: u32,
-    /// Avatar id, not the ship entity id.
+    /// Not the ship entity id. The Avatar id in some builds (14.11), another
+    /// player id in others (13.11); the `onArenaStateReceived` roster entry
+    /// holding this id also holds the Avatar id, which `Vehicle.owner` names.
     pub id: i64,
     pub name: String,
 }

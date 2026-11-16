@@ -12,6 +12,8 @@
 //!    XML) and the typed values they describe.
 //! 4. [`entity`] — named method calls and property values from step 2's
 //!    envelopes.
+//! 5. [`world`] — battle state built from those events: ships, deaths,
+//!    scores, capture points, smoke.
 //!
 //! [`pickle`] reads the Python pickles found in `PYTHON` values and in
 //! GameParams.
@@ -25,6 +27,7 @@ pub mod nested;
 pub mod packet;
 pub mod pickle;
 pub mod value;
+pub mod world;
 
 pub use container::Replay;
 pub use error::Error;

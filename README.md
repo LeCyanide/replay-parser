@@ -52,6 +52,13 @@ the same output, built on this crate instead.
    consumable radii, the recording player's camera. Much of it can be built
    and checked here on the fixtures; what needs GameParams (ranges, shell
    flight times, plane icons) waits for step 7.
+   *Started* (`world`): ship position/heading, health, team, alive and
+   area-of-interest, deaths with killer and reason code, team scores, battle
+   result, capture points (owner, progress, invader), smoke screens, clock
+   and battle stage. Not yet: interpolation, decoding `visibilityFlags`,
+   shells, torpedoes, squadrons, buildings, weather, consumables, and linking
+   ships to arena-info players (the arena info's `id` is the Avatar id only
+   in some builds; the `onArenaStateReceived` roster links them).
 9. **Draw-command emitter** 🖥 — world state → the existing `format.rs` record
    tags (`SHIP`, `HEALTH_BAR`, `SHOT_TRACER`, `TORPEDO`, `SMOKE`, `PLANE`,
    `CAPTURE_POINT`, …).
@@ -77,7 +84,14 @@ cargo build --release
 ./target/release/replay-dump packets <file.wowsreplay>   # one JSON line per packet
 ./target/release/replay-dump entities <file.wowsreplay> <scripts dir>   # entity decode coverage
 ./target/release/replay-dump events   <file.wowsreplay> <scripts dir>   # one JSON line per entity event
+./target/release/replay-dump world    <file.wowsreplay> <scripts dir>   # one world snapshot per game second
 ```
+
+On Windows, build with the GNU toolchain if MSVC build tools are not
+installed (`cargo +stable-x86_64-pc-windows-gnu test`), and run the
+entity-defs fetch from Git Bash as
+`MSYS_NO_PATHCONV=1 TMPDIR="$(cygpath -m "$PWD/target")" ./scripts/fetch-entity-defs.sh`,
+since Git Bash otherwise rewrites the sparse-checkout paths.
 
 ## Tests
 
@@ -105,6 +119,13 @@ On every fixture:
   arena info); team scores and capture progress are in range; and every
   vehicle in the arena info appears, by avatar id and ship id, in the pickled
   rosters of `onArenaStateReceived`.
+
+The world (`tests/world.rs`), at every packet of every fixture: ships stay
+on the map with health within max, capture progress stays in 0–1, smokes
+have points and a radius; at the end, every arena-info vehicle maps through
+its roster entry to a ship on team 0/1, the ships marked dead are exactly
+the `receiveVehicleDeath` victims (each dying once), killers are known
+ships, there are two team scores and a battle result, and a cap moved.
 
 The pickle reader is checked against CPython on `tests/pickle_corpus.json`
 (regenerate with `python3 -I scripts/gen-pickle-corpus.py`).
