@@ -242,6 +242,9 @@ pub struct World {
     /// Torpedo range by projectile params id; see `with_params`.
     #[serde(skip)]
     pub torpedo_ranges: HashMap<i64, f32>,
+    /// Consumable radii by (ship params id, consumable type name).
+    #[serde(skip)]
+    pub consumable_radii: HashMap<(i64, String), f32>,
 }
 
 fn i64_of(v: Option<&Value>) -> Option<i64> {
@@ -306,7 +309,23 @@ impl World {
     /// Uses GameParams for torpedo ranges.
     pub fn with_params(mut self, gp: &GameParams) -> Self {
         self.torpedo_ranges = gp.projectiles.values().filter_map(|p| Some((p.id, p.max_dist?))).collect();
+        for ship in gp.ships.values() {
+            for c in &ship.consumables {
+                let Some(r) = c.radius else { continue };
+                // Alternatives of one type in different slots: keep the larger.
+                let e = self.consumable_radii.entry((ship.id, c.kind.clone())).or_insert(r);
+                *e = e.max(r);
+            }
+        }
         self
+    }
+
+    /// The area of a consumable type (`Ship::consumables` ids) on a linked
+    /// ship, in world units, base value; needs `with_params`.
+    pub fn consumable_radius(&self, ship: &Ship, kind: i64) -> Option<f32> {
+        let params = self.players.get(ship.player?)?.ship_params_id;
+        let name = crate::gameparams::consumable_type(kind)?;
+        self.consumable_radii.get(&(params, name.to_owned())).copied()
     }
 
     /// The recording player's team, once its ship is linked.

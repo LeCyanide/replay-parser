@@ -54,7 +54,16 @@ the same output, built on this crate instead.
    takes about 2 s and 1.2 GB peak (15 M values; the pickle reader shares
    memoized values). Torpedo `maxDist` is in world units: torpedoes that
    run out on the local 15.10 replays die at a median 0.998 × `maxDist`
-   (max 1.25, upgrades). Not yet: consumable and ability radii.
+   (max 1.25, upgrades). Consumables per ship (every slot and
+   alternative: type, work time, radius); the type and its parameters are
+   in the ability's variant, under `logic`. Radii, in world units: radar,
+   hydroacoustic search and submarine locator `distShip`, fighters
+   `radius`. The replay's numeric consumable id is mapped to the type by a
+   table fitted on local replays (`consumable_type`); `World::consumable_radius`
+   gives a linked ship's radius. Checked: 97.6% of enemies inside an active
+   radar's radius are spotted, 64% just outside. Not yet: hydrophone (its
+   `hydrophoneWaveRadius` looks like metres, unverified), upgrade and skill
+   modifiers, the 3.5 km submarine wards.
 8. **Battle world** — the largest piece: ship state (position/heading
    interpolation, health, death, visibility/spotting), shells and tracer
    timing, torpedoes, squadrons, smoke, capture points, buildings, weather,
@@ -78,9 +87,9 @@ the same output, built on this crate instead.
    Active consumables per ship with their end time; the type is the
    `CONSUMABLE_ID`, which from 15.4 is the second byte of a 2-byte
    `consumableUsageParams`. Fighter patrols (`receive_wardAdded`): position,
-   radius, team, owner, until `receive_wardRemoved`.
-   Not yet: interpolation, naming the spotting reasons and consumable
-   types, consumable radii (GameParams), secondary shells, buildings (no
+   radius, team, owner, until `receive_wardRemoved` (on the local 15.x
+   replays every ward is a submarine's, kind 2, 3.5 km).
+   Not yet: interpolation, naming the spotting reasons, secondary shells, buildings (no
    fixture has any), weather. Torpedoes that never get a kill message are
    dropped past 1.3 × their GameParams range (`World::with_params`), or at
    150 s without GameParams.
@@ -96,8 +105,7 @@ the same output, built on this crate instead.
     `sidecar/patches/`, and the toolkit's licence entries; keep credit for the
     format knowledge.
 
-Next: consumable radii from GameParams (the ability entries keyed by
-variant), buildings in 8 (none in the fixtures;
+Next: buildings in 8 (none in the fixtures;
 Operations replays have them), then 9 one record tag at a time, each
 checked with 10.
 
@@ -184,7 +192,8 @@ checks, for every installed build: every script and map `space.settings`
 inflates and matches its CRC32, GameParams is present, the entity defs load,
 and the catalogue names ships; then, with that build's GameParams, every
 roster ship is a GameParams ship with a catalogue name, every torpedo's
-params are a torpedo with a range, and every replay in the install's
+params are a torpedo with a range, active radars spot what is inside
+their radius, consumable ids map to types the ship carries, and every replay in the install's
 `replays/` recorded by an installed build decodes with no failures against
 that build's own defs, links its players (allies always; enemies at most
 once; PvE bot templates may spawn several ships, or none), and the

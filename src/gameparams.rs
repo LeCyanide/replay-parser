@@ -38,6 +38,46 @@ pub struct ShipParams {
     pub species: String,
     pub nation: String,
     pub level: i64,
+    /// Every consumable the ship can carry (all slots, all alternatives).
+    pub consumables: Vec<ConsumableParams>,
+}
+
+/// One variant of an ability (`PCY019_RLSSearch` / `USSR_10`), base values
+/// before upgrades and commander skills.
+#[derive(Clone, Debug, Serialize)]
+pub struct ConsumableParams {
+    /// `rls`, `sonar`, `crashCrew`, …; see `consumable_type` for the id
+    /// replays use.
+    pub kind: String,
+    pub work_time: f32,
+    /// Area in world units: detection range for radar, hydroacoustic search
+    /// and the submarine locator (`distShip`), patrol radius for fighters.
+    pub radius: Option<f32>,
+}
+
+/// The consumable type for the numeric id replays carry. Fitted on the local
+/// 15.9/15.10 replays (each id's uses match one type's work time on every
+/// ship that used it); only ids seen there are listed.
+pub fn consumable_type(id: i64) -> Option<&'static str> {
+    Some(match id {
+        0 => "crashCrew",
+        1 => "scout",
+        3 => "speedBoosters",
+        4 => "artilleryBoosters",
+        6 => "smokeGenerator",
+        8 => "regenCrew",
+        9 => "fighter",
+        10 => "sonar",
+        11 => "torpedoReloader",
+        12 => "rls",
+        31 => "buff",
+        36 => "hydrophone",
+        37 => "fastRudders",
+        38 => "subsEnergyFreeze",
+        42 => "submarineLocator",
+        65 => "auxTorpBooster",
+        _ => return None,
+    })
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -78,6 +118,33 @@ fn float(v: Option<&Value>) -> Option<f32> {
     v.and_then(Value::as_f64).map(|f| f as f32)
 }
 
+/// `ShipAbilities: {slot: {abils: [(ability name, variant), …]}}`.
+fn ship_consumables(ship: &Value, abilities: &HashMap<&str, &Value>) -> Vec<ConsumableParams> {
+    let Some(Value::Dict(slots)) = ship.get("ShipAbilities").and_then(Value::attrs) else { return Vec::new() };
+    let mut out = Vec::new();
+    for (_, slot) in slots.iter() {
+        let Some(Value::List(abils)) = slot.attrs().and_then(|s| s.get("abils")) else { continue };
+        for pair in abils.iter() {
+            let (Value::Tuple(t) | Value::List(t)) = pair else { continue };
+            let (Some(name), Some(variant)) = (t.first().and_then(Value::as_str), t.get(1).and_then(Value::as_str))
+            else {
+                continue;
+            };
+            let Some(v) = abilities.get(name).and_then(|a| a.get(variant)).and_then(Value::attrs) else { continue };
+            let kind = text(v.get("consumableType"));
+            let logic = v.get("logic").and_then(Value::attrs);
+            let field = |k| float(logic.and_then(|l| l.get(k)));
+            let radius = match kind.as_str() {
+                "rls" | "sonar" | "submarineLocator" => field("distShip"),
+                "fighter" | "callFighters" | "planeTacticalFighters" => field("radius"),
+                _ => None,
+            };
+            out.push(ConsumableParams { kind, work_time: float(v.get("workTime")).unwrap_or(0.0), radius });
+        }
+    }
+    out
+}
+
 impl GameParams {
     /// From the raw `content/GameParams.data` bytes.
     pub fn from_data(data: &[u8]) -> Result<Self, GameParamsError> {
@@ -93,6 +160,8 @@ impl GameParams {
         let base = root.get("").ok_or(GameParamsError::Layout("no base region \"\""))?;
         let Value::Dict(entries) = base else { return Err(GameParamsError::Layout("base region is not a dict")) };
         let mut out = GameParams::default();
+        let abilities: HashMap<&str, &Value> =
+            entries.iter().filter_map(|(k, v)| Some((k.as_str()?, v.attrs()?))).collect();
         for (_, entry) in entries.iter() {
             let Some(attrs) = entry.attrs() else { continue };
             let Some(id) = attrs.get("id").and_then(Value::as_i64) else { continue };
@@ -103,7 +172,8 @@ impl GameParams {
                 "Ship" => {
                     let nation = text(info.and_then(|i| i.get("nation")));
                     let level = attrs.get("level").and_then(Value::as_i64).unwrap_or(0);
-                    out.ships.insert(id, ShipParams { id, index, name, species, nation, level });
+                    let consumables = ship_consumables(attrs, &abilities);
+                    out.ships.insert(id, ShipParams { id, index, name, species, nation, level, consumables });
                 }
                 "Projectile" => {
                     let (max_dist, speed) = (float(attrs.get("maxDist")), float(attrs.get("speed")));

@@ -12,6 +12,7 @@ use replay_parser::Replay;
 use replay_parser::defs::EntityDefs;
 use replay_parser::entity::EntityDecoder;
 use replay_parser::gameparams::GameParams;
+use replay_parser::gameparams::consumable_type;
 use replay_parser::packet::Packets;
 use replay_parser::res::InstallScripts;
 use replay_parser::res::Resources;
@@ -72,6 +73,10 @@ fn installed_builds_decode_their_replays() {
     files.sort();
 
     let mut checked = 0;
+    // Enemies in an active radar's radius: (inside 0.95 r, spotted), and
+    // just outside (1.05–1.3 r).
+    let (mut inside, mut inside_spotted, mut outside, mut outside_spotted) = (0usize, 0usize, 0usize, 0usize);
+    let (mut uses, mut carried) = (0usize, 0usize);
     for build in builds {
         let res = Resources::open_build(&dir, build).unwrap();
         let defs = EntityDefs::load(&InstallScripts(&res)).unwrap();
@@ -93,6 +98,7 @@ fn installed_builds_decode_their_replays() {
                 assert!(names.contains_key(&format!("IDS_{}", ship.index)), "{name}: no name for {}", ship.index);
             }
             let pve = replay.meta.game_type.as_deref().is_some_and(|t| t.contains("PVE"));
+            let mut next = 0.0;
             for p in Packets::new(&replay.packets, v) {
                 let event = dec.feed(&p).unwrap_or_else(|e| panic!("{name} @ {:.2}s: {e}", p.clock));
                 world.apply(&dec, &p, event.as_ref());
@@ -104,6 +110,34 @@ fn installed_builds_decode_their_replays() {
                         "{name}: torpedo params {} are {kind:?}",
                         t.params_id
                     );
+                }
+                if world.clock < next {
+                    continue;
+                }
+                next = world.clock.floor() + 1.0;
+                for radar in world.ships.values().filter(|s| s.alive && s.consumable_active(12, world.clock)) {
+                    let Some(r) = world.consumable_radius(radar, 12) else { continue };
+                    for e in world.ships.values().filter(|e| e.alive && e.in_aoi && e.team != radar.team) {
+                        let d = ((e.position.x - radar.position.x).powi(2) + (e.position.z - radar.position.z).powi(2))
+                            .sqrt()
+                            / r;
+                        if d < 0.95 {
+                            inside += 1;
+                            inside_spotted += usize::from(e.spotted());
+                        } else if (1.05..1.3).contains(&d) {
+                            outside += 1;
+                            outside_spotted += usize::from(e.spotted());
+                        }
+                    }
+                }
+                // Each active consumable's fitted type is one the ship carries.
+                for ship in world.ships.values() {
+                    for &(kind, _) in &ship.consumables {
+                        let (Some(t), Some(p)) = (consumable_type(kind), ship.player) else { continue };
+                        uses += 1;
+                        let params = &gp.ships[&world.players[p].ship_params_id];
+                        carried += usize::from(params.consumables.iter().any(|c| c.kind == t));
+                    }
                 }
             }
             for (i, pl) in world.players.iter().enumerate() {
@@ -129,4 +163,16 @@ fn installed_builds_decode_their_replays() {
     }
     assert!(checked > 0, "no replay in {} matches an installed build", dir.join("replays").display());
     eprintln!("{checked} replays decoded against their installed build");
+    let (inside_share, outside_share) =
+        (inside_spotted as f64 / inside as f64, outside_spotted as f64 / outside as f64);
+    let carried_share = carried as f64 / uses as f64;
+    eprintln!(
+        "radar: {inside_share:.3} of enemies inside spotted, {outside_share:.3} just outside; {carried_share:.3} of consumable samples carried"
+    );
+    // Radar radii are in world units: nearly everything inside is spotted,
+    // much less just outside (spotted by other means).
+    assert!(inside > 1000 && inside_share > 0.95 && outside_share < 0.85);
+    // The fitted id table: almost every use is of a type the ship carries
+    // (99.7% locally; the rest are ships whose entry lacks regenCrew).
+    assert!(uses > 1000 && carried_share > 0.95);
 }
