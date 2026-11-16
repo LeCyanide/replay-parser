@@ -171,13 +171,15 @@ the same output, built on this crate instead.
 11. **Patch survey** ☁ — `replay-dump stats` (packet level) and
     `replay-dump entities` (entity level, first failure per method/property)
     already report what a new build breaks.
-12. **Cut-over** — sidecar depends on this crate; drop `vendor/` fetching,
-    `sidecar/patches/`, and the toolkit's licence entries; keep credit for the
-    format knowledge.
+12. **Cut-over** — done: the sidecar's `probe`, `bake` and `caps` run on
+    this crate alone (no `--engine`; no toolkit crates, `vendor/` fetching or
+    patches), and the licence notice became a credit for the format
+    knowledge. Bakes are byte-identical to the last `--engine parser` ones,
+    and the `.wtreply` format is unchanged, so toolkit-era bakes still load.
+    Comparing against the toolkit now needs a toolkit-era sidecar binary.
 
-Next: the remaining tags in 9 one at a time, each checked with 10
-(the parity on these seven replays is down to the toolkit's own gaps; the
-cut-over, 12, next).
+Next: the toolkit's gaps in 9 are ours to fix or keep now that parity is
+no longer the target; new game builds go through 11.
 
 ## Usage
 
