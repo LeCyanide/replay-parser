@@ -3,26 +3,48 @@
 //!   replay-dump meta    <file.wowsreplay>   arena info as JSON
 //!   replay-dump stats   <file.wowsreplay>   per-kind packet counts and decode failures
 //!   replay-dump packets <file.wowsreplay>   one JSON line per packet
+//!   replay-dump entities <file.wowsreplay> <scripts dir>
+//!       entity-level decode coverage, with the first failure of each kind
+//!   replay-dump events <file.wowsreplay> <scripts dir>
+//!       one JSON line per decoded entity event
 
 use std::collections::BTreeMap;
 use std::io::Write;
 
 use replay_parser::Replay;
+use replay_parser::defs::EntityDefs;
+use replay_parser::defs::ScriptDir;
+use replay_parser::entity::EntityDecoder;
+use replay_parser::entity::EntityError;
 use replay_parser::packet::Packets;
+
+/// Groups failures by entity and member, not by entity id or value.
+fn failure_key(e: &EntityError) -> String {
+    match e {
+        EntityError::UnknownEntity(_) => "unknown entity".into(),
+        EntityError::UnknownType(t) => format!("unknown type {t}"),
+        EntityError::MethodIndex { entity, index, .. } => format!("{entity}: method index {index}"),
+        EntityError::PropertyIndex { entity, index, .. } => format!("{entity}: property index {index}"),
+        EntityError::Value { entity, member, .. } => format!("{entity}.{member}: value"),
+        EntityError::Leftover { entity, member, .. } => format!("{entity}.{member}: leftover"),
+    }
+}
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (Some(cmd), Some(path)) = (args.first(), args.get(1)) else {
-        eprintln!("usage: replay-dump <meta|stats|packets> <file.wowsreplay>");
+        eprintln!(
+            "usage: replay-dump <meta|stats|packets> <file.wowsreplay>\n       replay-dump <entities|events> <file.wowsreplay> <scripts dir>"
+        );
         std::process::exit(2);
     };
-    if let Err(e) = run(cmd, std::path::Path::new(path)) {
+    if let Err(e) = run(cmd, std::path::Path::new(path), args.get(2).map(std::path::Path::new)) {
         eprintln!("error: {e}");
         std::process::exit(1);
     }
 }
 
-fn run(cmd: &str, path: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+fn run(cmd: &str, path: &std::path::Path, scripts: Option<&std::path::Path>) -> Result<(), Box<dyn std::error::Error>> {
     if cmd == "meta" {
         let bytes = std::fs::read(path)?;
         let (_, raw) = replay_parser::container::read_meta(&bytes)?;
@@ -61,6 +83,37 @@ fn run(cmd: &str, path: &std::path::Path) -> Result<(), Box<dyn std::error::Erro
                     "decoded": match decoded { Ok(d) => serde_json::to_value(d)?, Err(e) => serde_json::json!({"error": e}) },
                 });
                 writeln!(out, "{line}")?;
+            }
+        }
+        "entities" | "events" => {
+            let scripts = scripts.ok_or("needs a scripts directory")?;
+            let defs = EntityDefs::load(&ScriptDir(scripts.to_path_buf()))?;
+            let mut decoder = EntityDecoder::new(&defs);
+            let mut out = std::io::stdout().lock();
+            let mut ok = 0u64;
+            let mut failures: BTreeMap<String, (u64, String)> = BTreeMap::new();
+            for p in packets {
+                match decoder.feed(&p) {
+                    Ok(Some(event)) => {
+                        ok += 1;
+                        if cmd == "events" {
+                            writeln!(out, "{}", serde_json::json!({ "clock": p.clock, "e": event }))?;
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        let key = failure_key(&e);
+                        let entry = failures.entry(key).or_insert_with(|| (0, format!("@{:.2}s {e}", p.clock)));
+                        entry.0 += 1;
+                    }
+                }
+            }
+            if cmd == "entities" {
+                let bad: u64 = failures.values().map(|(n, _)| n).sum();
+                println!("decoded {ok}, failed {bad}");
+                for (k, (n, first)) in failures {
+                    println!("{n:>7}  {k}\n         first: {first}");
+                }
             }
         }
         other => return Err(format!("unknown command {other:?}").into()),

@@ -192,13 +192,15 @@ pub struct Rot3 {
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "kind")]
 pub enum Decoded<'a> {
-    /// The base half of the recording player's Avatar. `state` is the base
-    /// properties, which need entity definitions to read.
+    /// The base half of the recording player's Avatar. `state` is the
+    /// `BASE_AND_CLIENT` properties followed by component data. The stub
+    /// variant (wire 0x26) carries an empty `state`.
     BasePlayerCreate {
         entity_id: u32,
         entity_type: u16,
         #[serde(skip)]
         state: &'a [u8],
+        stub: bool,
     },
     CellPlayerCreate {
         entity_id: u32,
@@ -394,12 +396,12 @@ impl<'a> Packet<'a> {
 
         let decoded = (|| -> Result<Result<Decoded<'a>, DecodeError>, Short> {
             Ok(Ok(match kind {
-                Kind::BasePlayerCreate => {
-                    let entity_id = r.u32()?;
-                    let entity_type = r.u16()?;
-                    let state = r.bytes(r.0.len())?;
-                    Decoded::BasePlayerCreate { entity_id, entity_type, state }
-                }
+                Kind::BasePlayerCreate | Kind::BasePlayerCreateStub => Decoded::BasePlayerCreate {
+                    entity_id: r.u32()?,
+                    entity_type: r.u16()?,
+                    state: r.blob()?,
+                    stub: kind == Kind::BasePlayerCreateStub,
+                },
                 Kind::CellPlayerCreate => Decoded::CellPlayerCreate {
                     entity_id: r.u32()?,
                     space_id: r.u32()?,

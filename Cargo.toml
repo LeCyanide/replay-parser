@@ -16,6 +16,7 @@ path = "src/bin/replay-dump.rs"
 [dependencies]
 blowfish = "0.9"
 flate2 = "1"
+roxmltree = "0.20"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

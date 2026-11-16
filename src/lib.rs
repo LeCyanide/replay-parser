@@ -8,14 +8,22 @@
 //!    every payload whose layout does not depend on the game's entity
 //!    definitions. Entity method/property payloads are returned raw.
 //!
-//! Decoding those raw payloads needs the entity definitions shipped with the
-//! game client and is the next layer up; it is not here yet.
+//! 3. [`defs`] + [`value`] — the client's entity definitions (`scripts/`
+//!    XML) and the typed values they describe.
+//! 4. [`entity`] — named method calls and property values from step 2's
+//!    envelopes.
+//!
+//! [`pickle`] reads the Python pickles found in `PYTHON` values and in
+//! GameParams.
 
 pub mod container;
+pub mod defs;
+pub mod entity;
 pub mod error;
 pub mod meta;
 pub mod packet;
 pub mod pickle;
+pub mod value;
 
 pub use container::Replay;
 pub use error::Error;
