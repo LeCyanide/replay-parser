@@ -18,6 +18,8 @@ use crate::ReplayMeta;
 use crate::entity::EntityDecoder;
 use crate::entity::Event;
 use crate::gameparams::GameParams;
+use crate::nested::Change;
+use crate::nested::PathStep;
 use crate::packet::Decoded;
 use crate::packet::Packet;
 use crate::packet::Vec3;
@@ -170,6 +172,31 @@ pub struct Building {
     pub suppressed: bool,
 }
 
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct Weather {
+    pub name: String,
+    /// World x, z.
+    pub position: [f32; 2],
+    pub radius: f32,
+    /// The weather `InteractiveZone` this entry follows.
+    pub entity: Option<u32>,
+}
+
+/// A `localWeather` entry's position: a vector or an `[x, z]` list.
+fn weather_position(v: &Value) -> Option<[f32; 2]> {
+    match v {
+        Value::Vector2(p) => Some(*p),
+        Value::List(p) => Some([f32_of(p.first())?, f32_of(p.get(1))?]),
+        _ => None,
+    }
+}
+
+/// A `localWeather` entry: name, world x, z, radius.
+fn weather_entry(v: &Value) -> Option<(String, [f32; 2], f32)> {
+    let pos = weather_position(v.get("position")?)?;
+    Some((text_of(v.get("name")), pos, f32_of(v.get("radius")).unwrap_or(0.0)))
+}
+
 /// A squadron as the minimap shows it.
 #[derive(Clone, Debug, Serialize)]
 pub struct Squadron {
@@ -277,6 +304,16 @@ pub struct World {
     pub ships: BTreeMap<u32, Ship>,
     pub caps: BTreeMap<u32, CapturePoint>,
     pub buildings: BTreeMap<u32, Building>,
+    /// Arms-race drops: the GameParams id of the buff each zone (an
+    /// `InteractiveZone` with no control point) holds, from BattleLogic's
+    /// `state.drop.data`; it can name a zone before the zone exists.
+    pub drops: HashMap<u32, i64>,
+    /// Local weather (squalls, storms), in the old renderer's one ordered
+    /// list: BattleLogic's `state.weather.localWeather` changes write it by
+    /// index, and a weather `InteractiveZone` (type 5) takes the first
+    /// unlinked entry of its name or appends its own; the entity's
+    /// position packets then move that entry.
+    pub weather: Vec<Weather>,
     pub smokes: BTreeMap<u32, Smoke>,
     pub squadrons: BTreeMap<u64, Squadron>,
     /// By Vehicle entity id, which may not be in `ships` yet. Kept, marked
@@ -296,6 +333,18 @@ pub struct World {
     /// Consumable radii by (ship params id, consumable type name).
     #[serde(skip)]
     pub consumable_radii: HashMap<(i64, String), f32>,
+}
+
+/// `InteractiveZone.type` of weather zones.
+const WEATHER_ZONE: i64 = 5;
+
+/// A name sent as a string or as a list of byte values.
+fn text_of(v: Option<&Value>) -> String {
+    match v {
+        Some(Value::List(b)) => b.iter().filter_map(|c| i64_of(Some(c)).map(|c| c as u8 as char)).collect(),
+        Some(Value::String(b) | Value::UnicodeString(b)) => String::from_utf8_lossy(b).into_owned(),
+        _ => String::new(),
+    }
 }
 
 fn i64_of(v: Option<&Value>) -> Option<i64> {
@@ -409,6 +458,11 @@ impl World {
                 Decoded::PlayerOrientation { entity_id, parent_id: 0, position, rotation } => {
                     self.moved(entity_id, position, rotation.yaw, clock)
                 }
+                Decoded::NonVolatilePosition { entity_id, position, .. } => {
+                    if let Some(w) = self.weather.iter_mut().find(|w| w.entity == Some(entity_id)) {
+                        w.position = [position.x, position.z];
+                    }
+                }
                 _ => {}
             }
         }
@@ -457,6 +511,26 @@ impl World {
                             );
                         }
                     }
+                    "InteractiveZone" if i64_of(dec.property(entity_id, "type")) == Some(WEATHER_ZONE) => {
+                        if let Some(p) = position {
+                            let radius = f32_of(dec.property(entity_id, "radius")).unwrap_or(0.0);
+                            let name = text_of(dec.property(entity_id, "name"));
+                            let (position, entity) = ([p.x, p.z], Some(entity_id));
+                            match self.weather.iter_mut().find(|w| w.name == name && w.entity.is_none()) {
+                                Some(w) => (w.position, w.radius, w.entity) = (position, radius, entity),
+                                None => self.weather.push(Weather { name, position, radius, entity }),
+                            }
+                        }
+                    }
+                    "BattleLogic" => {
+                        let state = dec.property(entity_id, "state");
+                        let zones = state.and_then(|s| s.get("weather")).and_then(|w| w.get("localWeather"));
+                        for (name, position, radius) in list(zones).iter().filter_map(weather_entry) {
+                            if !self.weather.iter().any(|w| w.name == name) {
+                                self.weather.push(Weather { name, position, radius, entity: None });
+                            }
+                        }
+                    }
                     "InteractiveZone" => {
                         if let Some(p) = position {
                             let radius = f32_of(dec.property(entity_id, "radius")).unwrap_or(0.0);
@@ -486,6 +560,11 @@ impl World {
                     s.aim_yaw = Some((v & 0xFF) as f32 / 256.0 * std::f32::consts::TAU - std::f32::consts::PI);
                 }
             }
+            Event::Nested { entity: "BattleLogic", property: "state", path, change, .. }
+                if path.get(..2) == Some(&[PathStep::Field("weather"), PathStep::Field("localWeather")]) =>
+            {
+                self.weather_change(&path[2..], change)
+            }
             Event::Property { entity_id, entity, .. } | Event::Nested { entity_id, entity, .. } => {
                 self.refresh(dec, *entity_id, entity)
             }
@@ -499,6 +578,12 @@ impl World {
                 // a smoke that re-enters is re-created by its EntityCreate.
                 "SmokeScreen" => {
                     self.smokes.remove(entity_id);
+                }
+                // Buff zones go when picked up; capture points stay.
+                "InteractiveZone" => {
+                    if self.caps.get(entity_id).is_some_and(|c| c.index < 0) {
+                        self.caps.remove(entity_id);
+                    }
                 }
                 _ => {}
             },
@@ -741,6 +826,46 @@ impl World {
         }
     }
 
+    /// A change to `state.weather.localWeather`, as the old renderer applies
+    /// it: a splice with values overwrites from `start` on (keeping the
+    /// entity link) and one without removes; a field change edits one entry.
+    fn weather_change(&mut self, rest: &[PathStep], change: &Change) {
+        match (rest, change) {
+            ([], Change::Splice { start, end, values }) if values.is_empty() => {
+                let end = (*end).min(self.weather.len());
+                if *start < end {
+                    self.weather.drain(*start..end);
+                }
+            }
+            ([], Change::Splice { start, values, .. }) => {
+                for (i, v) in values.iter().enumerate() {
+                    self.weather_set(start + i, v);
+                }
+            }
+            ([], Change::SetElement { index, value }) => self.weather_set(*index, value),
+            ([PathStep::Index(i)], Change::SetField { field, value }) => {
+                let Some(w) = self.weather.get_mut(*i) else { return };
+                match *field {
+                    "position" => w.position = weather_position(value).unwrap_or(w.position),
+                    "radius" => w.radius = f32_of(Some(value)).unwrap_or(w.radius),
+                    "name" => w.name = text_of(Some(value)),
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn weather_set(&mut self, index: usize, v: &Value) {
+        if self.weather.len() <= index {
+            self.weather.resize(index + 1, Weather::default());
+        }
+        if let Some((name, position, radius)) = weather_entry(v) {
+            let w = &mut self.weather[index];
+            (w.name, w.position, w.radius) = (name, position, radius);
+        }
+    }
+
     fn torpedo(&mut self, owner: u32, shot_id: i64) -> Option<&mut Torpedo> {
         self.torpedoes.iter_mut().find(|t| t.owner == owner && t.shot_id == shot_id)
     }
@@ -798,6 +923,12 @@ impl World {
                 let teams = prop("state").and_then(|s| s.get("missions")).and_then(|m| m.get("teamsScore"));
                 if let Some(Value::List(teams)) = teams {
                     self.scores = teams.iter().map(|t| i64_of(t.get("score")).unwrap_or(0)).collect();
+                }
+                let drops = prop("state").and_then(|s| s.get("drop")).and_then(|d| d.get("data"));
+                for d in list(drops) {
+                    if let (Some(zone), Some(params)) = (i64_of(d.get("zoneId")), i64_of(d.get("paramsId"))) {
+                        self.drops.insert(zone as u32, params);
+                    }
                 }
             }
             "InteractiveZone" => {

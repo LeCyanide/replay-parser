@@ -121,6 +121,9 @@ pub struct GameParams {
     pub aircraft: HashMap<i64, AircraftParams>,
     /// Building species (`AirBase`, `AntiAircraft`, `CoastalArtillery`, …).
     pub buildings: HashMap<i64, String>,
+    /// Arms-race drops: minimap marker names (`markerNameActive`,
+    /// `markerNameInactive`), e.g. `damage_active`.
+    pub drops: HashMap<i64, (String, String)>,
 }
 
 fn text(v: Option<&Value>) -> String {
@@ -212,6 +215,10 @@ impl GameParams {
             let info = attrs.get("typeinfo").and_then(Value::attrs);
             let (kind, species) = (text(info.and_then(|i| i.get("type"))), text(info.and_then(|i| i.get("species"))));
             let (index, name) = (text(attrs.get("index")), text(attrs.get("name")));
+            if let Some(active) = attrs.get("markerNameActive") {
+                let inactive = text(attrs.get("markerNameInactive"));
+                out.drops.insert(id, (text(Some(active)), inactive));
+            }
             match kind.as_str() {
                 "Ship" => {
                     let nation = text(info.and_then(|i| i.get("nation")));

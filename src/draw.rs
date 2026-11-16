@@ -135,6 +135,20 @@ pub enum Draw<'a> {
         progress: f32,
         invader_color: Option<[u8; 3]>,
     },
+    /// A squall or storm.
+    WeatherZone {
+        pos: [f32; 2],
+        radius: i32,
+    },
+    /// An arms-race buff waiting to be picked up.
+    BuffZone {
+        pos: [f32; 2],
+        radius: i32,
+        color: [u8; 3],
+        alpha: f32,
+        /// Icon name from the drop's GameParams, e.g. `damage_active`.
+        marker_name: Option<&'a str>,
+    },
     Building {
         pos: [f32; 2],
         color: [u8; 3],
@@ -418,7 +432,7 @@ pub fn frame<'a>(
     world: &World,
     map: &MapGeometry,
     labels: &'a Labels,
-    gp: Option<&GameParams>,
+    gp: Option<&'a GameParams>,
     flights: &Flights,
     clock: f32,
 ) -> Vec<Draw<'a>> {
@@ -448,6 +462,18 @@ pub fn frame<'a>(
             label,
             progress: c.progress,
             invader_color: (c.has_invaders && c.invader_team >= 0).then(|| team_color(c.invader_team, own)),
+        });
+    }
+
+    // Arms-race buffs, behind everything else but the caps.
+    for (id, c) in world.caps.iter().filter(|(_, c)| c.enabled && c.index < 0) {
+        let drop = world.drops.get(id).and_then(|d| gp?.drops.get(d));
+        out.push(Draw::BuffZone {
+            pos: map.px(c.position.x, c.position.z),
+            radius: map.len(c.radius).max(5),
+            color: team_color(c.team, own),
+            alpha: CAP_ALPHA,
+            marker_name: drop.map(|(active, inactive)| if c.team >= 0 { active } else { inactive }.as_str()),
         });
     }
 
@@ -494,6 +520,10 @@ pub fn frame<'a>(
             let radius = map.len(s.radius).max(3);
             out.push(Draw::Smoke { pos: map.px(p[0], p[2]), radius, color: SMOKE_COLOR, alpha: SMOKE_ALPHA });
         }
+    }
+
+    for w in &world.weather {
+        out.push(Draw::WeatherZone { pos: map.px(w.position[0], w.position[1]), radius: map.len(w.radius).max(5) });
     }
 
     for b in world.buildings.values().filter(|b| !b.hidden) {

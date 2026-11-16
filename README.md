@@ -91,7 +91,7 @@ the same output, built on this crate instead.
    replays every ward is a submarine's, kind 2, 3.5 km).
    Buildings (Operations) are kept from their create packet on, with
    `isAlive`/`isSuppressed` kept current. Not yet: interpolation, naming
-   the spotting reasons, weather. Torpedoes that never get a kill message are
+   the spotting reasons. Torpedoes that never get a kill message are
    dropped past 1.3 × their GameParams range (`World::with_params`), or at
    150 s without GameParams.
 9. **Draw-command emitter** 🖥 — world state → the existing `format.rs` record
@@ -135,8 +135,16 @@ the same output, built on this crate instead.
    `BUILDING` matches on every record of the Operation (none of its
    buildings dies; the toolkit never updates a building after its create
    packet, so ours would differ once one is destroyed, showing it dead).
-   Not yet: buff zones, weather; division gold, interpolation between
-   packets.
+   `BUFF_ZONE` (InteractiveZones with no control point, other than
+   weather; icon from the drop named in BattleLogic `state.drop.data`) and
+   `WEATHER_ZONE` (the toolkit's one ordered list fed by
+   `state.weather.localWeather` changes and weather zone entities, which
+   move by their position packets) match on every record of three replays
+   (Atoll and an Operation with both, Greece with a moving storm). A
+   random on Greece, new to the harness, shows what is left beyond the
+   five: division gold, a submarine's depth suffix (`(Scope)` against our
+   `(60m*)`), dead-ship positions up to ~7 px off, and some torpedo paths.
+   Not yet: division gold, interpolation between packets.
 10. **Parity harness** — done, in the suite: `npm run diff-timeline -- old.wtreply
     new.wtreply`. Running it needs bakes from both sidecars (🖥).
 11. **Patch survey** ☁ — `replay-dump stats` (packet level) and
@@ -147,7 +155,7 @@ the same output, built on this crate instead.
     format knowledge.
 
 Next: the remaining tags in 9 one at a time, each checked with 10
-(buff zones and weather next).
+(division gold and the Greece differences next).
 
 ## Usage
 
