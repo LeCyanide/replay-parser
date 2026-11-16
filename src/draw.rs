@@ -590,7 +590,7 @@ pub fn frame<'a>(
         if sighting.is_some_and(|m| m.visible) {
             // Outside the area of interest the world position is stale.
             let pos = match (ship, sighting) {
-                (Some(s), Some(m)) if !s.in_aoi => map.px(m.position[0], m.position[1]),
+                (Some(s), Some(m)) if !(s.in_aoi && s.located) => map.px(m.position[0], m.position[1]),
                 (Some(s), _) => map.px(s.position.x, s.position.z),
                 (None, Some(m)) => map.px(m.position[0], m.position[1]),
                 (None, None) => unreachable!(),
@@ -654,7 +654,11 @@ pub fn frame<'a>(
         let (Some(aim), Some(m)) = (s.aim_yaw, world.minimap.get(&id).filter(|m| m.visible)) else { continue };
         out.push(Draw::CameraDirection {
             entity_id: id,
-            pos: if s.in_aoi { map.px(s.position.x, s.position.z) } else { map.px(m.position[0], m.position[1]) },
+            pos: if s.in_aoi && s.located {
+                map.px(s.position.x, s.position.z)
+            } else {
+                map.px(m.position[0], m.position[1])
+            },
             yaw: screen(aim),
             color: ship_color(id, relation(id).unwrap_or(2)),
             length: CAMERA_LINE,
@@ -680,8 +684,11 @@ pub fn frame<'a>(
     for (&id, ship) in world.ships.iter().filter(|(id, _)| !dead.contains(id)) {
         // Only ships the minimap shows; the world position while in view.
         let Some(m) = world.minimap.get(&id).filter(|m| m.visible) else { continue };
-        let pos =
-            if ship.in_aoi { map.px(ship.position.x, ship.position.z) } else { map.px(m.position[0], m.position[1]) };
+        let pos = if ship.in_aoi && ship.located {
+            map.px(ship.position.x, ship.position.z)
+        } else {
+            map.px(m.position[0], m.position[1])
+        };
         let friendly = relation(id).unwrap_or(2) < 2;
         for &(kind, until) in &ship.consumables {
             let Some(name) = crate::gameparams::consumable_type(kind) else { continue };

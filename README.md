@@ -114,7 +114,9 @@ the same output, built on this crate instead.
    from `setAmmoForWeapon`) and the disconnected flag (the roster's
    `isConnected` from `onGameRoomStateChanged`, counted from the first
    time the player is seen connected) matching, bar one frame where a
-   change lands on the frame boundary and 4 positions on Sleeping Giant;
+   change lands on the frame boundary (a ship's world position counts
+   only once a position packet follows its create packet, the minimap
+   sighting until then, as the toolkit's);
    `HEALTH_BAR` has every toolkit bar; a ship not yet in view gets a full
    bar from the arena roster's `maxHealth`, as the toolkit means to, but
    its bake gives every ship whose build it can resolve a consumable
@@ -160,7 +162,10 @@ the same output, built on this crate instead.
    and `receiveTorpedoSynchronization`, so homing torpedoes crawl and then
    stand still (ours land within a world unit of their server hit
    position; this is also Atoll's torpedo difference).
-   Not yet: interpolation between packets.
+   Interpolation between packets is not needed for parity: the suite's
+   toolkit bake sets a render clock but installs no position timeline, so
+   the toolkit draws each ship at its latest packet, as we do (the suite's
+   viewer interpolates between frames itself).
 10. **Parity harness** — done, in the suite: `npm run diff-timeline -- old.wtreply
     new.wtreply`. Running it needs bakes from both sidecars (🖥).
 11. **Patch survey** ☁ — `replay-dump stats` (packet level) and
@@ -171,7 +176,8 @@ the same output, built on this crate instead.
     format knowledge.
 
 Next: the remaining tags in 9 one at a time, each checked with 10
-(interpolation between packets next).
+(the parity on these seven replays is down to the toolkit's own gaps; the
+cut-over, 12, next).
 
 ## Usage
 

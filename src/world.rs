@@ -61,6 +61,10 @@ pub struct Ship {
     /// Between EntityCreate and EntityLeave: the recording client receives
     /// updates for it.
     pub in_aoi: bool,
+    /// A position packet has arrived since the last EntityCreate; until
+    /// then the old renderer has no world position for the ship (the
+    /// create packet's does not count) and draws its minimap sighting.
+    pub located: bool,
     /// Non-zero while the opposing team spots this ship; the bits are the
     /// reasons, not yet named. See [`Ship::spotted`].
     pub visibility_flags: i64,
@@ -573,6 +577,7 @@ impl World {
                             yaw: 0.0,
                             seen: clock,
                             in_aoi: true,
+                            located: false,
                             visibility_flags: 0,
                             consumables: Vec::new(),
                             params_id: 0,
@@ -582,6 +587,7 @@ impl World {
                             ammo: None,
                         });
                         ship.in_aoi = true;
+                        ship.located = false;
                         if let (Some(p), Some(r)) = (position, rotation) {
                             ship.position = *p;
                             ship.yaw = r.yaw;
@@ -723,7 +729,7 @@ impl World {
                     let position = self
                         .ships
                         .get(&victim)
-                        .filter(|s| s.in_aoi)
+                        .filter(|s| s.in_aoi && s.located)
                         .map(|s| [s.position.x, s.position.z])
                         .or_else(|| self.minimap.get(&victim).map(|m| m.position));
                     self.deaths.push(Death { clock, victim, killer, reason: int(2).unwrap_or(-1), position });
@@ -1003,6 +1009,7 @@ impl World {
             s.position = position;
             s.yaw = yaw;
             s.seen = clock;
+            s.located = true;
         }
     }
 
