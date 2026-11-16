@@ -11,6 +11,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
+use crate::gameparams::AircraftParams;
 use crate::gameparams::GameParams;
 use crate::world::Player;
 use crate::world::ShellHit;
@@ -29,6 +30,7 @@ const HP_BAR_BG_COLOR: [u8; 3] = [50, 50, 50];
 const HP_BAR_BG_ALPHA: f32 = 0.7;
 const UNDETECTED_OPACITY: f32 = 0.4;
 const CAP_ALPHA: f32 = 0.15;
+const PATROL_ALPHA: f32 = 0.12;
 /// A tracer's length as a share of the shell's path, at [`MAX_TRACER_CALIBER`]
 /// and above; smaller guns draw shorter, down to [`MIN_TRACER_RATIO`] of it.
 const TRACER_LEN: f32 = 0.12;
@@ -188,6 +190,24 @@ pub enum Draw<'a> {
         color: [u8; 3],
         secondary: bool,
     },
+    /// A fighter patrol's circle.
+    PatrolRadius {
+        plane_id: u64,
+        pos: [f32; 2],
+        radius: i32,
+        color: [u8; 3],
+        alpha: f32,
+    },
+    Plane {
+        plane_id: u64,
+        owner_entity_id: u32,
+        pos: [f32; 2],
+        /// `<dir>/<icon>_<ally|enemy>`, e.g. `controllable/fighter_he_enemy`.
+        icon_key: String,
+        /// Not for consumable planes (catapult fighters, spotters).
+        player_name: Option<&'a str>,
+        ship_name: Option<&'a str>,
+    },
 }
 
 /// Learned shell flight times: per shooter, (fired at, mean seconds to its
@@ -232,6 +252,59 @@ fn ammo_color(ammo: &str) -> [u8; 3] {
         "CS" => [255, 100, 100],
         _ => [140, 200, 255],
     }
+}
+
+/// `seaMine` → `sea_mine`, `HE` → `he`, `Scout` → `scout`.
+fn snake(s: &str) -> String {
+    let c: Vec<char> = s.chars().collect();
+    let mut out = String::new();
+    for (i, &ch) in c.iter().enumerate() {
+        let prev = i.checked_sub(1).map(|j| c[j]);
+        let next = c.get(i + 1);
+        let boundary = ch.is_uppercase()
+            && prev.is_some_and(|p| {
+                p.is_lowercase() || p.is_ascii_digit() || (p.is_uppercase() && next.is_some_and(|n| n.is_lowercase()))
+            });
+        if boundary && !out.ends_with('_') {
+            out.push('_');
+        }
+        out.extend(if ch == '-' || ch == ' ' { '_' } else { ch }.to_lowercase());
+    }
+    out
+}
+
+/// A squadron's icon (`<dir>/<base>`, without the ally/enemy suffix) and
+/// whether it is a consumable plane, as the old renderer picks them.
+fn plane_icon(a: Option<&AircraftParams>) -> (String, bool) {
+    let species = a.map(|a| a.species.as_str()).filter(|s| !s.is_empty());
+    let ammo = a.map(|a| snake(&a.ammo_type)).unwrap_or_default();
+    let ammo = match ammo.as_str() {
+        "sea_mine" => "mine",
+        "depthcharge" => "depth_charge",
+        other => other,
+    };
+    let has = |k: &str| a.is_some_and(|a| a.subtypes.iter().any(|s| s == k));
+    let dir = match (a, species) {
+        (None, _) => "consumables",
+        (_, Some("Airship" | "Auxiliary")) => "controllable",
+        _ if has("airsupport") => "airsupport",
+        _ if has("consumable") || ammo.is_empty() => "consumables",
+        _ => "controllable",
+    };
+    let consumable = dir == "consumables";
+    let with = |base: &str| if ammo.is_empty() { base.to_owned() } else { format!("{base}_{ammo}") };
+    let base = match (species, consumable) {
+        (None, _) => "fighter".to_owned(),
+        (Some("Dive"), _) => with("bomber"),
+        (Some(sp), true) => snake(sp),
+        (Some("Fighter"), false) => with("fighter"),
+        (Some("Bomber"), false) if ammo == "torpedo_deepwater" => ammo.to_owned(),
+        (Some("Bomber"), false) => "torpedo_regular".to_owned(),
+        (Some("Skip"), false) => with("skip"),
+        (Some("Airship" | "Auxiliary"), false) => "auxiliary".to_owned(),
+        (Some(_), false) => with("fighter"),
+    };
+    (format!("{dir}/{base}"), consumable)
 }
 
 fn relation_color(relation: u32) -> [u8; 3] {
@@ -448,6 +521,32 @@ pub fn frame<'a>(
             ship_name: l.and_then(|l| l.ship.as_deref()),
         });
     }
+
+    for sq in world.squadrons.values() {
+        let enemy = match relation(sq.owner) {
+            Some(r) => r >= 2,
+            None => own.is_some_and(|o| sq.team != o),
+        };
+        let (icon, consumable) = plane_icon(gp.and_then(|gp| gp.aircraft.get(&sq.params_id)));
+        if let Some(w) = world.patrols.get(&sq.id) {
+            out.push(Draw::PatrolRadius {
+                plane_id: sq.id,
+                pos: map.px(w.position[0], w.position[2]),
+                radius: map.len(w.radius),
+                color: if enemy { ENEMY_COLOR } else { ALLY_COLOR },
+                alpha: PATROL_ALPHA,
+            });
+        }
+        let l = label(sq.owner).filter(|_| !consumable);
+        out.push(Draw::Plane {
+            plane_id: sq.id,
+            owner_entity_id: sq.owner,
+            pos: map.px(sq.position[0], sq.position[1]),
+            icon_key: format!("{icon}_{}", if enemy { "enemy" } else { "ally" }),
+            player_name: l.map(|l| l.player.as_str()),
+            ship_name: l.and_then(|l| l.ship.as_deref()),
+        });
+    }
     out
 }
 
@@ -477,6 +576,26 @@ mod tests {
         assert_eq!(flight(f.get(&7), 18.0, 2.0), 5.0);
         assert_eq!(flight(f.get(&7), 22.0, 2.0), 9.0);
         assert_eq!(flight(f.get(&8), 22.0, 2.0), 2.0);
+    }
+
+    #[test]
+    fn names_plane_icons_as_the_renderer() {
+        let plane = |species: &str, subtypes: &[&str], ammo: &str| AircraftParams {
+            id: 0,
+            index: String::new(),
+            name: String::new(),
+            species: species.into(),
+            subtypes: subtypes.iter().map(|s| s.to_string()).collect(),
+            ammo_type: ammo.into(),
+        };
+        let icon = |a: AircraftParams| plane_icon(Some(&a));
+        assert_eq!(icon(plane("Fighter", &[], "HE")), ("controllable/fighter_he".into(), false));
+        assert_eq!(icon(plane("Bomber", &[], "torpedo")), ("controllable/torpedo_regular".into(), false));
+        assert_eq!(icon(plane("Scout", &["consumable"], "")), ("consumables/scout".into(), true));
+        assert_eq!(icon(plane("Fighter", &[], "")), ("consumables/fighter".into(), true));
+        assert_eq!(icon(plane("Dive", &["airsupport"], "seaMine")), ("airsupport/bomber_mine".into(), false));
+        assert_eq!(plane_icon(None), ("consumables/fighter".into(), true));
+        assert_eq!(snake("HEBomb"), "he_bomb");
     }
 
     #[test]

@@ -107,6 +107,11 @@ pub struct AircraftParams {
     pub name: String,
     /// `Fighter`, `Dive`, `Bomber`, `Scout`, …
     pub species: String,
+    /// `planeSubtype`: `consumable` (catapult fighters, spotters),
+    /// `airsupport` (depth-charge and mine planes); empty for carrier planes.
+    pub subtypes: Vec<String>,
+    /// The `ammoType` of its `bombName` projectile; empty without one.
+    pub ammo_type: String,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -223,10 +228,23 @@ impl GameParams {
                         .insert(id, ProjectileParams { id, index, name, species, max_dist, speed, ammo_type, caliber });
                 }
                 "Aircraft" => {
-                    out.aircraft.insert(id, AircraftParams { id, index, name, species });
+                    let subtypes = match attrs.get("planeSubtype") {
+                        Some(Value::List(l) | Value::Tuple(l)) => {
+                            l.iter().filter_map(Value::as_str).map(str::to_owned).collect()
+                        }
+                        _ => Vec::new(),
+                    };
+                    // Resolved once all projectiles are in.
+                    let ammo_type = text(attrs.get("bombName"));
+                    out.aircraft.insert(id, AircraftParams { id, index, name, species, subtypes, ammo_type });
                 }
                 _ => {}
             }
+        }
+        let ammo: HashMap<&str, &str> =
+            out.projectiles.values().map(|p| (p.name.as_str(), p.ammo_type.as_str())).collect();
+        for a in out.aircraft.values_mut() {
+            a.ammo_type = ammo.get(a.ammo_type.as_str()).copied().unwrap_or_default().to_owned();
         }
         if out.ships.is_empty() {
             return Err(GameParamsError::Layout("no ships"));

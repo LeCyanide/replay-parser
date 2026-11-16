@@ -120,9 +120,11 @@ the same output, built on this crate instead.
    agree to 0.2 units). `SHOT_TRACER` and its tip (main and secondary)
    match on every record: shells are kept 30 s like the toolkit's salvos
    and paced by flight times learned from their hits in a first pass over
-   the replay. Not yet: planes, patrol and consumable
-   circles, camera direction, buildings, buff zones, weather; division
-   gold, interpolation between packets.
+   the replay. `PLANE` (icon key from the aircraft's species, subtype and
+   bomb ammo; owner names except on consumable planes) and fighter
+   `PATROL_RADIUS` match on every record. Not yet: consumable circles,
+   camera direction, buildings, buff zones, weather; division gold,
+   interpolation between packets.
 10. **Parity harness** — done, in the suite: `npm run diff-timeline -- old.wtreply
     new.wtreply`. Running it needs bakes from both sidecars (🖥).
 11. **Patch survey** ☁ — `replay-dump stats` (packet level) and
@@ -132,8 +134,8 @@ the same output, built on this crate instead.
     `sidecar/patches/`, and the toolkit's licence entries; keep credit for the
     format knowledge.
 
-Next: the remaining tags in 9 one at a time, each checked with 10 (planes
-next); buildings in 8 (none in the fixtures; Operations
+Next: the remaining tags in 9 one at a time, each checked with 10
+(consumable circles next); buildings in 8 (none in the fixtures; Operations
 replays have them).
 
 ## Usage
