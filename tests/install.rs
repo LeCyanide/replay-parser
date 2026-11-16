@@ -10,6 +10,8 @@ use std::path::PathBuf;
 
 use replay_parser::Replay;
 use replay_parser::defs::EntityDefs;
+use replay_parser::draw;
+use replay_parser::draw::Draw;
 use replay_parser::entity::EntityDecoder;
 use replay_parser::gameparams::GameParams;
 use replay_parser::gameparams::consumable_type;
@@ -77,6 +79,7 @@ fn installed_builds_decode_their_replays() {
     // just outside (1.05–1.3 r).
     let (mut inside, mut inside_spotted, mut outside, mut outside_spotted) = (0usize, 0usize, 0usize, 0usize);
     let (mut uses, mut carried) = (0usize, 0usize);
+    let (mut frames, mut self_drawn) = (0usize, 0usize);
     for build in builds {
         let res = Resources::open_build(&dir, build).unwrap();
         let defs = EntityDefs::load(&InstallScripts(&res)).unwrap();
@@ -97,6 +100,8 @@ fn installed_builds_decode_their_replays() {
                     gp.ships.get(&v.ship_id).unwrap_or_else(|| panic!("{name}: ship {} not in GameParams", v.ship_id));
                 assert!(names.contains_key(&format!("IDS_{}", ship.index)), "{name}: no name for {}", ship.index);
             }
+            let space = res.read(&format!("{}/space.settings", replay.meta.map_name)).unwrap();
+            let map = draw::MapGeometry::from_space_settings(&String::from_utf8_lossy(&space)).unwrap();
             let pve = replay.meta.game_type.as_deref().is_some_and(|t| t.contains("PVE"));
             let mut next = 0.0;
             for p in Packets::new(&replay.packets, v) {
@@ -115,6 +120,29 @@ fn installed_builds_decode_their_replays() {
                     continue;
                 }
                 next = world.clock.floor() + 1.0;
+                // Draw commands: each ship once, torpedoes on the map; the recording
+                // player's ship drawn, detected, once linked and alive.
+                let labels = draw::labels(&world.players, Some(&gp), &names);
+                let cmds = draw::frame(&world, &map, &labels, world.clock);
+                let mut ships = std::collections::HashSet::new();
+                let on_map = |p: &[f32; 2]| p.iter().all(|v| (-1.0..=769.0).contains(v));
+                for c in &cmds {
+                    match c {
+                        // Ships may be off the square (Operations spawn bots there).
+                        Draw::Ship { entity_id, .. } | Draw::DeadShip { entity_id, .. } => {
+                            assert!(ships.insert(*entity_id), "{name}: ship {entity_id} drawn twice");
+                        }
+                        Draw::Torpedo { pos, .. } => assert!(on_map(pos), "{name}: {c:?}"),
+                        _ => {}
+                    }
+                }
+                if world.ships.values().any(|s| s.alive && s.player.is_some_and(|p| world.players[p].relation == 0)) {
+                    frames += 1;
+                    self_drawn +=
+                        usize::from(cmds.iter().any(|c| {
+                            matches!(c, Draw::Ship { is_self: true, detected: true, ship_name: Some(_), .. })
+                        }));
+                }
                 for radar in world.ships.values().filter(|s| s.alive && s.consumable_active(12, world.clock)) {
                     let Some(r) = world.consumable_radius(radar, 12) else { continue };
                     for e in world.ships.values().filter(|e| e.alive && e.in_aoi && e.team != radar.team) {
@@ -175,4 +203,6 @@ fn installed_builds_decode_their_replays() {
     // The fitted id table: almost every use is of a type the ship carries
     // (99.7% locally; the rest are ships whose entry lacks regenCrew).
     assert!(uses > 1000 && carried_share > 0.95);
+    eprintln!("own ship drawn in {self_drawn} of {frames} frames");
+    assert!(frames > 1000 && self_drawn as f64 / frames as f64 > 0.99);
 }

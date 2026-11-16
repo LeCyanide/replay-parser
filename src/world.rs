@@ -130,6 +130,12 @@ pub struct CapturePoint {
     pub progress: f32,
     pub invader_team: i64,
     pub both_inside: bool,
+    pub has_invaders: bool,
+    /// `captureLogic.isEnabled`; disabled zones are not drawn.
+    pub enabled: bool,
+    /// `controlPoint.type`: 0 control, 1 base, 2 mega base, 3 building,
+    /// 4 base with points, 5 epicenter.
+    pub kind: i64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -159,7 +165,11 @@ pub struct Sighting {
     pub position: [f32; 2],
     /// Quantized to 2π / 256.
     pub yaw: f32,
+    /// Clock of the last update with a position.
     pub at: f32,
+    /// False once an update says the position is gone; `position` and `yaw`
+    /// are then the last known ones.
+    pub visible: bool,
 }
 
 /// Unpacks `MINIMAP_USER_INFO.packedData`: bits 0–10 x, 11–21 z (each
@@ -232,8 +242,8 @@ pub struct World {
     pub caps: BTreeMap<u32, CapturePoint>,
     pub smokes: BTreeMap<u32, Smoke>,
     pub squadrons: BTreeMap<u64, Squadron>,
-    /// By Vehicle entity id, which may not be in `ships` yet. Removed when an
-    /// update says the position is gone.
+    /// By Vehicle entity id, which may not be in `ships` yet. Kept, marked
+    /// not visible, when an update says the position is gone.
     pub minimap: BTreeMap<u32, Sighting>,
     pub patrols: BTreeMap<u64, Patrol>,
     pub torpedoes: Vec<Torpedo>,
@@ -328,6 +338,15 @@ impl World {
         self.consumable_radii.get(&(params, name.to_owned())).copied()
     }
 
+    /// The arena-info player of a Vehicle entity, whether or not its ship
+    /// has been created (minimap-only ships are not).
+    pub fn player_of(&self, id: u32) -> Option<usize> {
+        self.ships
+            .get(&id)
+            .and_then(|s| s.player)
+            .or_else(|| self.players.iter().position(|p| p.roster.contains(&i64::from(id))))
+    }
+
     /// The recording player's team, once its ship is linked.
     pub fn own_team(&self) -> Option<i64> {
         let me = self.players.iter().position(|p| p.relation == 0)?;
@@ -392,6 +411,9 @@ impl World {
                                     progress: 0.0,
                                     invader_team: -1,
                                     both_inside: false,
+                                    has_invaders: false,
+                                    enabled: true,
+                                    kind: 0,
                                 },
                             );
                         }
@@ -497,10 +519,12 @@ impl World {
                     };
                     match unpack_minimap(packed as u32) {
                         Some((position, yaw)) => {
-                            self.minimap.insert(id as u32, Sighting { position, yaw, at: clock });
+                            self.minimap.insert(id as u32, Sighting { position, yaw, at: clock, visible: true });
                         }
                         None => {
-                            self.minimap.remove(&(id as u32));
+                            if let Some(m) = self.minimap.get_mut(&(id as u32)) {
+                                m.visible = false;
+                            }
                         }
                     }
                 }
@@ -689,6 +713,9 @@ impl World {
                 c.progress = f32_of(logic.and_then(|l| l.get("progress"))).unwrap_or(c.progress);
                 c.invader_team = i64_of(logic.and_then(|l| l.get("invaderTeam"))).unwrap_or(c.invader_team);
                 c.both_inside = i64_of(logic.and_then(|l| l.get("bothInside"))).unwrap_or(0) != 0;
+                c.has_invaders = i64_of(logic.and_then(|l| l.get("hasInvaders"))).unwrap_or(0) != 0;
+                c.enabled = i64_of(logic.and_then(|l| l.get("isEnabled"))).is_none_or(|e| e != 0);
+                c.kind = i64_of(cp.and_then(|p| p.get("type"))).unwrap_or(c.kind);
             }
             "SmokeScreen" => {
                 let radius = f32_of(prop("bcRadius")).or(f32_of(prop("radius"))).unwrap_or(0.0);

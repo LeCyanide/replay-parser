@@ -23,6 +23,7 @@
 
 pub mod container;
 pub mod defs;
+pub mod draw;
 pub mod entity;
 pub mod error;
 pub mod gameparams;

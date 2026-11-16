@@ -12,6 +12,8 @@
 //!   replay-dump world <file.wowsreplay> <scripts dir>
 //!       one JSON world snapshot per second of game clock (with a game
 //!       install, torpedoes stop at their GameParams range)
+//!   replay-dump draw <file.wowsreplay> <game dir>
+//!       one JSON line of draw commands per second of game clock
 //!   replay-dump res <game dir> [path]
 //!       list the newest build's packaged files, or write one to stdout
 
@@ -49,7 +51,8 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (Some(cmd), Some(path)) = (args.first(), args.get(1)) else {
         eprintln!(
-            "usage: replay-dump <meta|stats|packets> <file.wowsreplay>\n       replay-dump <entities|events|world> <file.wowsreplay> <scripts dir>\n       replay-dump res <game dir> [path]"
+            "usage: replay-dump <meta|stats|packets> <file.wowsreplay>\n       replay-dump <entities|events|world> <file.wowsreplay> <scripts dir>
+       replay-dump draw <file.wowsreplay> <game dir>\n       replay-dump res <game dir> [path]"
         );
         std::process::exit(2);
     };
@@ -165,6 +168,30 @@ fn run(cmd: &str, path: &std::path::Path, scripts: Option<&std::path::Path>) -> 
                 }
             }
             writeln!(out, "{}", serde_json::to_string(&world)?)?;
+        }
+        "draw" => {
+            let dir = scripts.ok_or("needs a game directory")?;
+            let res = replay_parser::res::Resources::open_build(dir, version.build)?;
+            let defs = EntityDefs::load(&replay_parser::res::InstallScripts(&res))?;
+            let gp = replay_parser::gameparams::GameParams::load(&res)?;
+            let names = res.catalog("en")?;
+            let space = res.read(&format!("{}/space.settings", replay.meta.map_name))?;
+            let map = replay_parser::draw::MapGeometry::from_space_settings(&String::from_utf8_lossy(&space))
+                .ok_or("no map bounds in space.settings")?;
+            let mut decoder = EntityDecoder::new(&defs);
+            let mut world = replay_parser::world::World::new(&replay.meta).with_params(&gp);
+            let mut out = std::io::stdout().lock();
+            let mut next = 0f32;
+            for p in packets {
+                let event = decoder.feed(&p).ok().flatten();
+                world.apply(&decoder, &p, event.as_ref());
+                if world.clock >= next {
+                    let labels = replay_parser::draw::labels(&world.players, Some(&gp), &names);
+                    let cmds = replay_parser::draw::frame(&world, &map, &labels, world.clock);
+                    writeln!(out, "{}", serde_json::json!({ "clock": world.clock, "draw": cmds }))?;
+                    next = world.clock.floor() + 1.0;
+                }
+            }
         }
         other => return Err(format!("unknown command {other:?}").into()),
     }

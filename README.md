@@ -95,7 +95,18 @@ the same output, built on this crate instead.
    150 s without GameParams.
 9. **Draw-command emitter** 🖥 — world state → the existing `format.rs` record
    tags (`SHIP`, `HEALTH_BAR`, `SHOT_TRACER`, `TORPEDO`, `SMOKE`, `PLANE`,
-   `CAPTURE_POINT`, …).
+   `CAPTURE_POINT`, …). *Started* (`draw`): `draw::frame` gives one frame's
+   commands in the renderer's pixel space (768 px square, north up; the
+   map's side from `space.settings` bounds, `(chunks − 4) × chunkSize`) with
+   its colours and rules, for `CAPTURE_POINT`, `TORPEDO`, `SMOKE`, `SHIP`
+   (detected from the minimap entry, else drawn at the last known minimap
+   position, faded and unnamed), `HEALTH_BAR` and `DEAD_SHIP`; labels
+   (player, ship and species names) from GameParams and the catalogue.
+   `replay-dump draw <replay> <game dir>` prints a frame per second. Not
+   yet: tracers, planes, patrol and consumable circles, camera direction,
+   buildings, weather; division gold, the disconnected flag, ammo name
+   colours, submarine depth, interpolation between packets. The sidecar
+   does not use it yet, so the diff harness (10) has not compared it.
 10. **Parity harness** — done, in the suite: `npm run diff-timeline -- old.wtreply
     new.wtreply`. Running it needs bakes from both sidecars (🖥).
 11. **Patch survey** ☁ — `replay-dump stats` (packet level) and
@@ -105,9 +116,10 @@ the same output, built on this crate instead.
     `sidecar/patches/`, and the toolkit's licence entries; keep credit for the
     format knowledge.
 
-Next: buildings in 8 (none in the fixtures;
-Operations replays have them), then 9 one record tag at a time, each
-checked with 10.
+Next: a `bake` in the sidecar built on `draw`, so 10 can diff the tags done
+so far against today's bakes; then the remaining tags in 9 one at a time,
+each checked with 10; buildings in 8 (none in the fixtures; Operations
+replays have them).
 
 ## Usage
 
