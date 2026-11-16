@@ -9,6 +9,7 @@
 //! updates applied, rather than re-interpreted from the event.
 
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::collections::HashSet;
 
 use serde::Serialize;
@@ -16,6 +17,7 @@ use serde::Serialize;
 use crate::ReplayMeta;
 use crate::entity::EntityDecoder;
 use crate::entity::Event;
+use crate::gameparams::GameParams;
 use crate::packet::Decoded;
 use crate::packet::Packet;
 use crate::packet::Vec3;
@@ -28,9 +30,11 @@ use crate::value::Value;
 pub const SHELL_TIME_SCALE: f32 = 0.36;
 
 /// Torpedoes that run out of range normally get a kill message; a few never
-/// do (about 1 in 25 on the fixtures).
-/// shortcut: dropped at this age, about twice the longest run seen; use the
-/// torpedo's range from GameParams once step 7 lands.
+/// do (about 1 in 25 on the fixtures). Those are dropped past their range
+/// times this (upgrades add up to a quarter; fitted on local 15.10 replays),
+/// or at `TORPEDO_MAX_AGE` when the range is unknown.
+pub const TORPEDO_RANGE_SLACK: f32 = 1.3;
+/// About twice the longest run seen.
 pub const TORPEDO_MAX_AGE: f32 = 150.0;
 
 #[derive(Clone, Debug, Serialize)]
@@ -182,12 +186,24 @@ pub struct Torpedo {
     pub position: [f32; 3],
     pub velocity: [f32; 3],
     pub at: f32,
+    /// Base range in world units, from GameParams when the world has them.
+    pub range: Option<f32>,
 }
 
 impl Torpedo {
     pub fn position_at(&self, clock: f32) -> [f32; 3] {
         let dt = clock - self.at;
         std::array::from_fn(|i| self.position[i] + self.velocity[i] * dt)
+    }
+
+    /// Past its range, or too old when the range is unknown. Course changes
+    /// keep the speed, so distance run is speed times age.
+    fn spent(&self, clock: f32) -> bool {
+        let age = clock - self.launched;
+        match self.range {
+            Some(r) => self.velocity.iter().map(|v| v * v).sum::<f32>().sqrt() * age > r * TORPEDO_RANGE_SLACK,
+            None => age >= TORPEDO_MAX_AGE,
+        }
     }
 }
 
@@ -223,6 +239,9 @@ pub struct World {
     pub torpedoes: Vec<Torpedo>,
     pub shells: Vec<Shell>,
     pub deaths: Vec<Death>,
+    /// Torpedo range by projectile params id; see `with_params`.
+    #[serde(skip)]
+    pub torpedo_ranges: HashMap<i64, f32>,
 }
 
 fn i64_of(v: Option<&Value>) -> Option<i64> {
@@ -284,6 +303,12 @@ impl World {
         Self { players, ..Self::default() }
     }
 
+    /// Uses GameParams for torpedo ranges.
+    pub fn with_params(mut self, gp: &GameParams) -> Self {
+        self.torpedo_ranges = gp.projectiles.values().filter_map(|p| Some((p.id, p.max_dist?))).collect();
+        self
+    }
+
     /// The recording player's team, once its ship is linked.
     pub fn own_team(&self) -> Option<i64> {
         let me = self.players.iter().position(|p| p.relation == 0)?;
@@ -295,7 +320,7 @@ impl World {
         self.clock = self.clock.max(packet.clock);
         let clock = self.clock;
         self.shells.retain(|s| s.arrives > clock);
-        self.torpedoes.retain(|t| clock - t.launched < TORPEDO_MAX_AGE);
+        self.torpedoes.retain(|t| !t.spent(clock));
         if let Ok(decoded) = packet.decode() {
             match decoded {
                 Decoded::Position { entity_id, position, rotation, .. } => {
@@ -429,7 +454,7 @@ impl World {
                     };
                     // An unreadable roster leaves ships unlinked, not the world broken.
                     let Ok(pickle::Value::List(entries)) = pickle::from_slice(b) else { continue };
-                    for entry in &entries {
+                    for entry in entries.iter() {
                         let mut ints = HashSet::new();
                         pickle_ints(entry, &mut ints);
                         if let Some(p) = self
@@ -530,6 +555,7 @@ impl World {
                             position,
                             velocity,
                             at: clock,
+                            range: self.torpedo_ranges.get(&params_id).copied(),
                         });
                     }
                 }

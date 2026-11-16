@@ -46,8 +46,15 @@ the same output, built on this crate instead.
 6. **Entity definitions + entity decoding** ☁ — done (`defs`, `entity`,
    `nested`) from a loose `scripts/` directory or the install. Methods, properties, creates and nested property updates decode
    against tracked per-entity state; see Tests for what is checked.
-7. **GameParams** 🖥 — ships, artillery/torpedo/plane params, consumables, the
-   subset the simulation and labels need. The pickle reader is ready for it.
+7. **GameParams** 🖥 — *started* (`gameparams`): `content/GameParams.data`
+   is a zlib stream written back to front holding a protocol-2 pickle of
+   `{region: {name: GPData}}`; region `""` is the base. Extracted: ships (id,
+   index for the catalogue name, species, nation, tier), projectiles
+   (species; torpedo `maxDist` and `speed`) and aircraft (species). Loading
+   takes about 2 s and 1.2 GB peak (15 M values; the pickle reader shares
+   memoized values). Torpedo `maxDist` is in world units: torpedoes that
+   run out on the local 15.10 replays die at a median 0.998 × `maxDist`
+   (max 1.25, upgrades). Not yet: consumable and ability radii.
 8. **Battle world** — the largest piece: ship state (position/heading
    interpolation, health, death, visibility/spotting), shells and tracer
    timing, torpedoes, squadrons, smoke, capture points, buildings, weather,
@@ -75,7 +82,8 @@ the same output, built on this crate instead.
    Not yet: interpolation, naming the spotting reasons and consumable
    types, consumable radii (GameParams), secondary shells, buildings (no
    fixture has any), weather. Torpedoes that never get a kill message are
-   dropped at 150 s until GameParams gives their range.
+   dropped past 1.3 × their GameParams range (`World::with_params`), or at
+   150 s without GameParams.
 9. **Draw-command emitter** 🖥 — world state → the existing `format.rs` record
    tags (`SHIP`, `HEALTH_BAR`, `SHOT_TRACER`, `TORPEDO`, `SMOKE`, `PLANE`,
    `CAPTURE_POINT`, …).
@@ -88,8 +96,8 @@ the same output, built on this crate instead.
     `sidecar/patches/`, and the toolkit's licence entries; keep credit for the
     format knowledge.
 
-Next: 7 (GameParams: ship indexes and classes for names and icons,
-consumable radii, torpedo ranges), buildings in 8 (none in the fixtures;
+Next: consumable radii from GameParams (the ability entries keyed by
+variant), buildings in 8 (none in the fixtures;
 Operations replays have them), then 9 one record tag at a time, each
 checked with 10.
 
@@ -174,7 +182,9 @@ WOWS_DIR=/path/to/World_of_Warships cargo test --release -- --ignored
 
 checks, for every installed build: every script and map `space.settings`
 inflates and matches its CRC32, GameParams is present, the entity defs load,
-and the catalogue names ships; then every replay in the install's
+and the catalogue names ships; then, with that build's GameParams, every
+roster ship is a GameParams ship with a catalogue name, every torpedo's
+params are a torpedo with a range, and every replay in the install's
 `replays/` recorded by an installed build decodes with no failures against
 that build's own defs, links its players (allies always; enemies at most
 once; PvE bot templates may spawn several ships, or none), and the

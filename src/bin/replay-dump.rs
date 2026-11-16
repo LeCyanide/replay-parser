@@ -10,7 +10,8 @@
 //!   replay-dump events <file.wowsreplay> <scripts dir>
 //!       one JSON line per decoded entity event
 //!   replay-dump world <file.wowsreplay> <scripts dir>
-//!       one JSON world snapshot per second of game clock
+//!       one JSON world snapshot per second of game clock (with a game
+//!       install, torpedoes stop at their GameParams range)
 //!   replay-dump res <game dir> [path]
 //!       list the newest build's packaged files, or write one to stdout
 
@@ -148,6 +149,10 @@ fn run(cmd: &str, path: &std::path::Path, scripts: Option<&std::path::Path>) -> 
             let defs = load_defs(scripts, version)?;
             let mut decoder = EntityDecoder::new(&defs);
             let mut world = replay_parser::world::World::new(&replay.meta);
+            if scripts.join("bin").is_dir() {
+                let res = replay_parser::res::Resources::open_build(scripts, version.build)?;
+                world = world.with_params(&replay_parser::gameparams::GameParams::load(&res)?);
+            }
             let mut out = std::io::stdout().lock();
             let mut next = 0f32;
             for p in packets {

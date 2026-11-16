@@ -1,0 +1,197 @@
+//! GameParams: the client's table of every ship, projectile, aircraft and
+//! more, by GameParams id (the `shipId` / `paramsID` values replays carry).
+//!
+//! `content/GameParams.data` is a zlib stream written back to front; inflated,
+//! it is a Python 2 pickle of `{region: {name: GPData}}`. Region `""` is the
+//! base table; the others (`RU`, `NA`, …) share almost all of its entries.
+//! Only the fields the battle world and the labels need are extracted.
+//!
+//! Loading the full pickle takes about 2 s and peaks around 1.2 GB (15
+//! million values); the extract kept afterwards is small.
+
+use std::collections::HashMap;
+use std::io::Read;
+
+use serde::Serialize;
+
+use crate::pickle;
+use crate::pickle::Value;
+
+#[derive(Debug, thiserror::Error)]
+pub enum GameParamsError {
+    #[error("read or inflate: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("pickle: {0}")]
+    Pickle(#[from] pickle::PickleError),
+    #[error("unexpected layout: {0}")]
+    Layout(&'static str),
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct ShipParams {
+    pub id: i64,
+    /// `PJSD207`; the ship's display name is `IDS_<index>` in the catalogue.
+    pub index: String,
+    /// `PJSD207_Shiratsuyu`.
+    pub name: String,
+    /// `Destroyer`, `Cruiser`, `Battleship`, `AirCarrier`, `Submarine`, …
+    pub species: String,
+    pub nation: String,
+    pub level: i64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct ProjectileParams {
+    pub id: i64,
+    pub index: String,
+    pub name: String,
+    /// `Artillery`, `Torpedo`, `Bomb`, `DepthCharge`, …
+    pub species: String,
+    /// Range in world units (torpedoes; base value, before upgrades, which
+    /// add up to about a quarter on the local replays).
+    pub max_dist: Option<f32>,
+    /// Knots (torpedoes; base value).
+    pub speed: Option<f32>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct AircraftParams {
+    pub id: i64,
+    pub index: String,
+    pub name: String,
+    /// `Fighter`, `Dive`, `Bomber`, `Scout`, …
+    pub species: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct GameParams {
+    pub ships: HashMap<i64, ShipParams>,
+    pub projectiles: HashMap<i64, ProjectileParams>,
+    pub aircraft: HashMap<i64, AircraftParams>,
+}
+
+fn text(v: Option<&Value>) -> String {
+    v.and_then(Value::as_str).unwrap_or_default().to_owned()
+}
+
+fn float(v: Option<&Value>) -> Option<f32> {
+    v.and_then(Value::as_f64).map(|f| f as f32)
+}
+
+impl GameParams {
+    /// From the raw `content/GameParams.data` bytes.
+    pub fn from_data(data: &[u8]) -> Result<Self, GameParamsError> {
+        let reversed: Vec<u8> = data.iter().rev().copied().collect();
+        let mut pickled = Vec::new();
+        flate2::read::ZlibDecoder::new(&reversed[..]).read_to_end(&mut pickled)?;
+        Self::from_pickle(&pickled)
+    }
+
+    /// From the inflated pickle.
+    pub fn from_pickle(pickled: &[u8]) -> Result<Self, GameParamsError> {
+        let root = pickle::from_slice(pickled)?;
+        let base = root.get("").ok_or(GameParamsError::Layout("no base region \"\""))?;
+        let Value::Dict(entries) = base else { return Err(GameParamsError::Layout("base region is not a dict")) };
+        let mut out = GameParams::default();
+        for (_, entry) in entries.iter() {
+            let Some(attrs) = entry.attrs() else { continue };
+            let Some(id) = attrs.get("id").and_then(Value::as_i64) else { continue };
+            let info = attrs.get("typeinfo").and_then(Value::attrs);
+            let (kind, species) = (text(info.and_then(|i| i.get("type"))), text(info.and_then(|i| i.get("species"))));
+            let (index, name) = (text(attrs.get("index")), text(attrs.get("name")));
+            match kind.as_str() {
+                "Ship" => {
+                    let nation = text(info.and_then(|i| i.get("nation")));
+                    let level = attrs.get("level").and_then(Value::as_i64).unwrap_or(0);
+                    out.ships.insert(id, ShipParams { id, index, name, species, nation, level });
+                }
+                "Projectile" => {
+                    let (max_dist, speed) = (float(attrs.get("maxDist")), float(attrs.get("speed")));
+                    out.projectiles.insert(id, ProjectileParams { id, index, name, species, max_dist, speed });
+                }
+                "Aircraft" => {
+                    out.aircraft.insert(id, AircraftParams { id, index, name, species });
+                }
+                _ => {}
+            }
+        }
+        if out.ships.is_empty() {
+            return Err(GameParamsError::Layout("no ships"));
+        }
+        Ok(out)
+    }
+
+    pub fn load(res: &crate::res::Resources) -> Result<Self, GameParamsError> {
+        Self::from_data(&res.read("content/GameParams.data")?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A two-entry table as the client pickles it (protocol 2, GPData
+    /// objects built from a state dict, typeinfo as a nested object).
+    fn sample() -> Vec<u8> {
+        let mut p = b"\x80\x02}(U\x00}(".to_vec();
+        let entry = |p: &mut Vec<u8>, name: &str, fields: &[(&str, &[u8])], info: &[(&str, &str)]| {
+            p.push(b'U');
+            p.push(name.len() as u8);
+            p.extend(name.as_bytes());
+            p.extend(b"cGameParams\nGPData\n)\x81}(");
+            for (k, v) in fields {
+                p.push(b'U');
+                p.push(k.len() as u8);
+                p.extend(k.as_bytes());
+                p.extend(*v);
+            }
+            p.extend(b"U\x08typeinfocGameParams\nTypeInfo\n)\x81}(");
+            for (k, v) in info {
+                for s in [k, v] {
+                    p.push(b'U');
+                    p.push(s.len() as u8);
+                    p.extend(s.as_bytes());
+                }
+            }
+            p.extend(b"ubub"); // typeinfo state, BUILD; entry state, BUILD
+        };
+        entry(
+            &mut p,
+            "PJSD207_Shiratsuyu",
+            &[
+                ("id", b"J\xd0\x1c\x0c\xf3"),
+                ("index", b"U\x07PJSD207"),
+                ("name", b"U\x12PJSD207_Shiratsuyu"),
+                ("level", b"K\x07"),
+            ],
+            &[("type", "Ship"), ("species", "Destroyer"), ("nation", "Japan")],
+        );
+        entry(
+            &mut p,
+            "PBPT206_Furious_top",
+            &[("id", b"J\xd0\x5c\x16\xf3"), ("index", b"U\x07PBPT206"), ("maxDist", b"KP"), ("speed", b"K#")],
+            &[("type", "Projectile"), ("species", "Torpedo"), ("nation", "UK")],
+        );
+        p.extend(b"uu.");
+        p
+    }
+
+    #[test]
+    fn extracts_ships_and_torpedoes() {
+        let gp = GameParams::from_pickle(&sample()).unwrap();
+        let ship = gp.ships.values().next().unwrap();
+        assert_eq!((ship.index.as_str(), ship.species.as_str(), ship.level), ("PJSD207", "Destroyer", 7));
+        let t = gp.projectiles.values().next().unwrap();
+        assert_eq!((t.species.as_str(), t.max_dist, t.speed), ("Torpedo", Some(80.0), Some(35.0)));
+    }
+
+    #[test]
+    fn from_data_inflates_the_reversed_stream() {
+        let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        std::io::Write::write_all(&mut z, &sample()).unwrap();
+        let mut data = z.finish().unwrap();
+        data.reverse();
+        assert_eq!(GameParams::from_data(&data).unwrap().ships.len(), 1);
+        assert!(GameParams::from_pickle(b"\x80\x02}.").is_err());
+    }
+}

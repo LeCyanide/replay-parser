@@ -7,10 +7,15 @@
 //! kept as [`Value::Object`] (class, constructor args, state) instead of being
 //! constructed: the reader never imports or calls anything.
 //!
+//! Containers hold their contents behind `Rc`: a pickle that references one
+//! object from many places (GameParams shares each entry across 13 regions)
+//! then shares it in the tree too, instead of copying it per reference.
+//!
 //! Protocols 0 through 5 are accepted. Persistent ids and the extension
 //! registry are not, since nothing the game writes uses them.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -22,13 +27,13 @@ pub enum Value {
     BigInt(Vec<u8>),
     Float(f64),
     /// Python 2 `str` / Python 3 `bytes`.
-    Bytes(Vec<u8>),
+    Bytes(Rc<[u8]>),
     /// Python 2 `unicode` / Python 3 `str`.
-    Str(String),
-    List(Vec<Value>),
-    Tuple(Vec<Value>),
-    Dict(Vec<(Value, Value)>),
-    Set(Vec<Value>),
+    Str(Rc<str>),
+    List(Rc<Vec<Value>>),
+    Tuple(Rc<Vec<Value>>),
+    Dict(Rc<Vec<(Value, Value)>>),
+    Set(Rc<Vec<Value>>),
     /// A reference to a module attribute, usually a class.
     Global {
         module: String,
@@ -36,16 +41,16 @@ pub enum Value {
     },
     /// `callable(*args)` that was not evaluated, plus any state `BUILD` set.
     Object {
-        callable: Box<Value>,
-        args: Box<Value>,
-        state: Option<Box<Value>>,
+        callable: Rc<Value>,
+        args: Rc<Value>,
+        state: Option<Rc<Value>>,
     },
 }
 
 impl Value {
     pub fn as_str(&self) -> Option<&str> {
         match self {
-            Value::Str(s) => Some(s),
+            Value::Str(s) => Some(&**s),
             Value::Bytes(b) => std::str::from_utf8(b).ok(),
             _ => None,
         }
@@ -113,6 +118,25 @@ pub enum PickleError {
 /// `GET` must see the filled container. A container is only copied out of its
 /// cell when a parent consumes it, by which point it is complete.
 type Slot = Rc<RefCell<Value>>;
+
+/// A dict key that can be hashed: what GameParams and the packet stream use.
+#[derive(PartialEq, Eq, Hash)]
+enum Key {
+    Bytes(Rc<[u8]>),
+    Str(Rc<str>),
+    Int(i64),
+}
+
+impl Key {
+    fn of(v: &Value) -> Option<Key> {
+        match v {
+            Value::Bytes(b) => Some(Key::Bytes(b.clone())),
+            Value::Str(s) => Some(Key::Str(s.clone())),
+            Value::Int(i) => Some(Key::Int(*i)),
+            _ => None,
+        }
+    }
+}
 
 fn take(slot: Slot) -> Value {
     Rc::try_unwrap(slot).map(RefCell::into_inner).unwrap_or_else(|shared| shared.borrow().clone())
@@ -210,15 +234,15 @@ impl<'a> Machine<'a> {
 
     fn append(&mut self, items: Vec<Value>) -> Result<(), PickleError> {
         match &mut *self.top()?.borrow_mut() {
-            Value::List(l) => l.extend(items),
-            Value::Set(s) => s.extend(items),
+            Value::List(l) => Rc::make_mut(l).extend(items),
+            Value::Set(s) => Rc::make_mut(s).extend(items),
             // Lists of objects that define `extend`/`append` (rare) are kept
             // as their constructor call; the appended items are dropped onto a
             // list in their state so nothing is lost.
             Value::Object { state, .. } => {
-                let s = state.get_or_insert_with(|| Box::new(Value::List(Vec::new())));
-                match s.as_mut() {
-                    Value::List(l) => l.extend(items),
+                let s = state.get_or_insert_with(|| Rc::new(Value::List(Rc::default())));
+                match Rc::make_mut(s) {
+                    Value::List(l) => Rc::make_mut(l).extend(items),
                     _ => return Err(PickleError::Type("APPEND")),
                 }
             }
@@ -234,12 +258,26 @@ impl<'a> Machine<'a> {
         let top = self.top()?.clone();
         let mut target = top.borrow_mut();
         let Value::Dict(d) = &mut *target else { return Err(PickleError::Type("SETITEM")) };
+        let d = Rc::make_mut(d);
+        // Later keys replace earlier ones, as in Python. Large dicts look
+        // hashable keys up through an index, so building one stays linear.
+        let mut index: Option<HashMap<Key, usize>> = (d.len() + items.len() / 2 > 16)
+            .then(|| d.iter().enumerate().filter_map(|(i, (k, _))| Some((Key::of(k)?, i))).collect());
         let mut it = items.into_iter();
         while let (Some(k), Some(v)) = (it.next(), it.next()) {
-            // Later keys replace earlier ones, as in Python.
-            match d.iter_mut().find(|(ek, _)| *ek == k) {
-                Some(slot) => slot.1 = v,
-                None => d.push((k, v)),
+            let key = index.as_ref().and(Key::of(&k));
+            let found = match (&index, &key) {
+                (Some(ix), Some(key)) => ix.get(key).copied(),
+                _ => d.iter().position(|(ek, _)| *ek == k),
+            };
+            match found {
+                Some(i) => d[i].1 = v,
+                None => {
+                    if let (Some(ix), Some(key)) = (&mut index, key) {
+                        ix.insert(key, d.len());
+                    }
+                    d.push((k, v));
+                }
             }
         }
         Ok(())
@@ -363,63 +401,63 @@ impl<'a> Machine<'a> {
                 b'S' => {
                     let s = self.line()?;
                     let v = unquote_repr(s).ok_or(PickleError::Malformed { what: "STRING", at })?;
-                    self.push(Value::Bytes(v));
+                    self.push(Value::Bytes(v.into()));
                 }
                 b'T' => {
                     let n = self.u32()? as usize; // BINSTRING
                     let b = self.bytes(n)?.to_vec();
-                    self.push(Value::Bytes(b));
+                    self.push(Value::Bytes(b.into()));
                 }
                 b'U' => {
                     let n = self.u8()? as usize; // SHORT_BINSTRING
                     let b = self.bytes(n)?.to_vec();
-                    self.push(Value::Bytes(b));
+                    self.push(Value::Bytes(b.into()));
                 }
                 b'B' => {
                     let n = self.u32()? as usize; // BINBYTES
                     let b = self.bytes(n)?.to_vec();
-                    self.push(Value::Bytes(b));
+                    self.push(Value::Bytes(b.into()));
                 }
                 b'C' => {
                     let n = self.u8()? as usize; // SHORT_BINBYTES
                     let b = self.bytes(n)?.to_vec();
-                    self.push(Value::Bytes(b));
+                    self.push(Value::Bytes(b.into()));
                 }
                 0x8e => {
                     let n = self.u64()? as usize; // BINBYTES8
                     let b = self.bytes(n)?.to_vec();
-                    self.push(Value::Bytes(b));
+                    self.push(Value::Bytes(b.into()));
                 }
                 0x96 => {
                     let n = self.u64()? as usize; // BYTEARRAY8
                     let b = self.bytes(n)?.to_vec();
-                    self.push(Value::Bytes(b));
+                    self.push(Value::Bytes(b.into()));
                 }
                 b'V' => {
                     let s = self.line()?; // UNICODE, raw-unicode-escape
-                    self.push(Value::Str(raw_unicode_unescape(s)));
+                    self.push(Value::Str(raw_unicode_unescape(s).into()));
                 }
                 b'X' => {
                     let n = self.u32()? as usize;
                     let s = self.utf8(n)?;
-                    self.push(Value::Str(s));
+                    self.push(Value::Str(s.into()));
                 }
                 0x8c => {
                     let n = self.u8()? as usize; // SHORT_BINUNICODE
                     let s = self.utf8(n)?;
-                    self.push(Value::Str(s));
+                    self.push(Value::Str(s.into()));
                 }
                 0x8d => {
                     let n = self.u64()? as usize; // BINUNICODE8
                     let s = self.utf8(n)?;
-                    self.push(Value::Str(s));
+                    self.push(Value::Str(s.into()));
                 }
 
                 // ---- containers
-                b']' => self.push(Value::List(Vec::new())),
+                b']' => self.push(Value::List(Rc::default())),
                 b'l' => {
                     let items = self.pop_mark()?;
-                    self.push(Value::List(items));
+                    self.push(Value::List(Rc::new(items)));
                 }
                 b'a' => {
                     let v = take(self.pop()?);
@@ -429,10 +467,10 @@ impl<'a> Machine<'a> {
                     let items = self.pop_mark()?;
                     self.append(items)?;
                 }
-                b')' => self.push(Value::Tuple(Vec::new())),
+                b')' => self.push(Value::Tuple(Rc::default())),
                 b't' => {
                     let items = self.pop_mark()?;
-                    self.push(Value::Tuple(items));
+                    self.push(Value::Tuple(Rc::new(items)));
                 }
                 0x85..=0x87 => {
                     let n = (op - 0x84) as usize; // TUPLE1..3
@@ -441,12 +479,12 @@ impl<'a> Machine<'a> {
                         items.push(take(self.pop()?));
                     }
                     items.reverse();
-                    self.push(Value::Tuple(items));
+                    self.push(Value::Tuple(Rc::new(items)));
                 }
-                b'}' => self.push(Value::Dict(Vec::new())),
+                b'}' => self.push(Value::Dict(Rc::default())),
                 b'd' => {
                     let items = self.pop_mark()?;
-                    self.push(Value::Dict(Vec::new()));
+                    self.push(Value::Dict(Rc::default()));
                     self.set_items(items)?;
                 }
                 b's' => {
@@ -458,14 +496,14 @@ impl<'a> Machine<'a> {
                     let items = self.pop_mark()?;
                     self.set_items(items)?;
                 }
-                0x8f => self.push(Value::Set(Vec::new())), // EMPTY_SET
+                0x8f => self.push(Value::Set(Rc::default())), // EMPTY_SET
                 0x90 => {
                     let items = self.pop_mark()?; // ADDITEMS
                     self.append(items)?;
                 }
                 0x91 => {
                     let items = self.pop_mark()?; // FROZENSET
-                    self.push(Value::Set(items));
+                    self.push(Value::Set(Rc::new(items)));
                 }
 
                 // ---- objects (recorded, never evaluated)
@@ -478,28 +516,30 @@ impl<'a> Machine<'a> {
                     let name = take(self.pop()?); // STACK_GLOBAL
                     let module = take(self.pop()?);
                     match (module, name) {
-                        (Value::Str(module), Value::Str(name)) => self.push(Value::Global { module, name }),
+                        (Value::Str(module), Value::Str(name)) => {
+                            self.push(Value::Global { module: module.to_string(), name: name.to_string() })
+                        }
                         _ => return Err(PickleError::Type("STACK_GLOBAL")),
                     }
                 }
                 b'R' | 0x81 => {
                     let args = take(self.pop()?); // REDUCE / NEWOBJ
                     let callable = take(self.pop()?);
-                    self.push(Value::Object { callable: Box::new(callable), args: Box::new(args), state: None });
+                    self.push(Value::Object { callable: Rc::new(callable), args: Rc::new(args), state: None });
                 }
                 0x92 => {
                     let _kwargs = self.pop()?; // NEWOBJ_EX
                     let args = take(self.pop()?);
                     let callable = take(self.pop()?);
-                    self.push(Value::Object { callable: Box::new(callable), args: Box::new(args), state: None });
+                    self.push(Value::Object { callable: Rc::new(callable), args: Rc::new(args), state: None });
                 }
                 b'i' => {
                     let module = self.line_str("INST module")?.to_owned();
                     let name = self.line_str("INST name")?.to_owned();
                     let args = self.pop_mark()?;
                     self.push(Value::Object {
-                        callable: Box::new(Value::Global { module, name }),
-                        args: Box::new(Value::Tuple(args)),
+                        callable: Rc::new(Value::Global { module, name }),
+                        args: Rc::new(Value::Tuple(Rc::new(args))),
                         state: None,
                     });
                 }
@@ -510,19 +550,19 @@ impl<'a> Machine<'a> {
                     }
                     let callable = items.remove(0);
                     self.push(Value::Object {
-                        callable: Box::new(callable),
-                        args: Box::new(Value::Tuple(items)),
+                        callable: Rc::new(callable),
+                        args: Rc::new(Value::Tuple(Rc::new(items))),
                         state: None,
                     });
                 }
                 b'b' => {
                     let new_state = take(self.pop()?); // BUILD
                     match &mut *self.top()?.borrow_mut() {
-                        Value::Object { state, .. } => *state = Some(Box::new(new_state)),
+                        Value::Object { state, .. } => *state = Some(Rc::new(new_state)),
                         // BUILD on a plain dict merges, as `__setstate__` would.
                         Value::Dict(d) => {
                             if let Value::Dict(extra) = new_state {
-                                d.extend(extra);
+                                Rc::make_mut(d).extend(Rc::unwrap_or_clone(extra));
                             }
                         }
                         _ => return Err(PickleError::Type("BUILD")),
@@ -687,7 +727,7 @@ mod tests {
         let p = b"\x80\x02}q\x00(U\x01aq\x01K\x01U\x01bq\x02]q\x03(G?\xf8\x00\x00\x00\x00\x00\x00N\x88eu.";
         let v = from_slice(p).unwrap();
         assert_eq!(v.get("a"), Some(&Value::Int(1)));
-        assert_eq!(v.get("b"), Some(&Value::List(vec![Value::Float(1.5), Value::None, Value::Bool(true)])));
+        assert_eq!(v.get("b"), Some(&Value::List(Rc::new(vec![Value::Float(1.5), Value::None, Value::Bool(true)]))));
     }
 
     #[test]

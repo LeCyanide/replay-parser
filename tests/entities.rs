@@ -141,7 +141,7 @@ fn every_entity_packet_decodes_with_sane_content() {
                             let Value::Blob(b) = v else { panic!("{name}: {arg} is not a blob") };
                             let roster = pickle::from_slice(b).unwrap_or_else(|e| panic!("{name}: {arg}: {e}"));
                             let pickle::Value::List(entries) = roster else { panic!("{name}: {arg} not a list") };
-                            for entry in &entries {
+                            for entry in entries.iter() {
                                 let mut s = HashSet::new();
                                 ints(entry, &mut s);
                                 rosters.push(s);

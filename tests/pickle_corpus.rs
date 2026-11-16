@@ -15,7 +15,7 @@ fn canon(v: &Value) -> J {
         Value::BigInt(b) => json!({ "bigint": hex(b) }),
         Value::Float(f) => json!({ "float": hex(&f.to_le_bytes()) }),
         Value::Bytes(b) => json!({ "bytes": hex(b) }),
-        Value::Str(s) => json!(s),
+        Value::Str(s) => json!(&**s),
         Value::List(l) => json!({ "list": l.iter().map(canon).collect::<Vec<_>>() }),
         Value::Tuple(t) => json!({ "tuple": t.iter().map(canon).collect::<Vec<_>>() }),
         Value::Dict(d) => json!({ "dict": d.iter().map(|(k, v)| json!([canon(k), canon(v)])).collect::<Vec<_>>() }),

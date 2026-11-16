@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use replay_parser::Replay;
 use replay_parser::defs::EntityDefs;
 use replay_parser::entity::EntityDecoder;
+use replay_parser::gameparams::GameParams;
 use replay_parser::packet::Packets;
 use replay_parser::res::InstallScripts;
 use replay_parser::res::Resources;
@@ -75,6 +76,7 @@ fn installed_builds_decode_their_replays() {
         let res = Resources::open_build(&dir, build).unwrap();
         let defs = EntityDefs::load(&InstallScripts(&res)).unwrap();
         let names = res.catalog("en").unwrap();
+        let gp = GameParams::load(&res).unwrap();
         for path in &files {
             let Ok(replay) = Replay::from_file(path) else { continue };
             let v = replay.meta.version().unwrap();
@@ -83,11 +85,26 @@ fn installed_builds_decode_their_replays() {
             }
             let name = path.file_name().unwrap().to_string_lossy().into_owned();
             let mut dec = EntityDecoder::new(&defs);
-            let mut world = World::new(&replay.meta);
+            let mut world = World::new(&replay.meta).with_params(&gp);
+            // Every ship in the roster is in GameParams and has a name.
+            for v in &replay.meta.vehicles {
+                let ship =
+                    gp.ships.get(&v.ship_id).unwrap_or_else(|| panic!("{name}: ship {} not in GameParams", v.ship_id));
+                assert!(names.contains_key(&format!("IDS_{}", ship.index)), "{name}: no name for {}", ship.index);
+            }
             let pve = replay.meta.game_type.as_deref().is_some_and(|t| t.contains("PVE"));
             for p in Packets::new(&replay.packets, v) {
                 let event = dec.feed(&p).unwrap_or_else(|e| panic!("{name} @ {:.2}s: {e}", p.clock));
                 world.apply(&dec, &p, event.as_ref());
+                // Every torpedo's params are a torpedo with a range.
+                for t in &world.torpedoes {
+                    let kind = gp.projectiles.get(&t.params_id).map(|p| p.species.as_str());
+                    assert!(
+                        kind == Some("Torpedo") && t.range.is_some(),
+                        "{name}: torpedo params {} are {kind:?}",
+                        t.params_id
+                    );
+                }
             }
             for (i, pl) in world.players.iter().enumerate() {
                 let n = world.ships.values().filter(|s| s.player == Some(i)).count();
