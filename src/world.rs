@@ -49,9 +49,43 @@ pub struct Ship {
     /// Clock of the last position update.
     pub seen: f32,
     /// Between EntityCreate and EntityLeave: the recording client receives
-    /// updates for it. Raw `visibilityFlags` alongside, meaning not decoded.
+    /// updates for it.
     pub in_aoi: bool,
+    /// Non-zero while the opposing team spots this ship; the bits are the
+    /// reasons, not yet named. See [`Ship::spotted`].
     pub visibility_flags: i64,
+    /// Active consumables: (consumable type, clock it ends). Types are the
+    /// game's `CONSUMABLE_ID`s; names need GameParams-era tables.
+    pub consumables: Vec<(i64, f32)>,
+}
+
+impl Ship {
+    /// Spotted by the opposing team. On the fixtures, enemies of the
+    /// recording player carry this about 98% of the time they are in the area
+    /// of interest and almost never outside it; allies carry it while the
+    /// enemy sees them.
+    pub fn spotted(&self) -> bool {
+        self.visibility_flags != 0
+    }
+
+    pub fn consumable_active(&self, kind: i64, clock: f32) -> bool {
+        self.consumables.iter().any(|&(k, until)| k == kind && until > clock)
+    }
+}
+
+/// A fighter patrol ("ward") with its own circle on the minimap.
+#[derive(Clone, Debug, Serialize)]
+pub struct Patrol {
+    pub id: u64,
+    pub owner: u32,
+    pub team: i64,
+    pub kind: i64,
+    pub position: [f32; 3],
+    pub radius: f32,
+    /// The add message's `time`: 0 or 60 on the fixtures, and not when the
+    /// patrol ends (some outlive it); `receive_wardRemoved` ends it.
+    pub time: f32,
+    pub added: f32,
 }
 
 /// One arena-info vehicle entry.
@@ -185,6 +219,7 @@ pub struct World {
     /// By Vehicle entity id, which may not be in `ships` yet. Removed when an
     /// update says the position is gone.
     pub minimap: BTreeMap<u32, Sighting>,
+    pub patrols: BTreeMap<u64, Patrol>,
     pub torpedoes: Vec<Torpedo>,
     pub shells: Vec<Shell>,
     pub deaths: Vec<Death>,
@@ -249,6 +284,12 @@ impl World {
         Self { players, ..Self::default() }
     }
 
+    /// The recording player's team, once its ship is linked.
+    pub fn own_team(&self) -> Option<i64> {
+        let me = self.players.iter().position(|p| p.relation == 0)?;
+        self.ships.values().find(|s| s.player == Some(me)).map(|s| s.team)
+    }
+
     pub fn apply(&mut self, dec: &EntityDecoder, packet: &Packet, event: Option<&Event>) {
         // The stream's final trailer packet carries clock 0; never go back.
         self.clock = self.clock.max(packet.clock);
@@ -285,6 +326,7 @@ impl World {
                             seen: clock,
                             in_aoi: true,
                             visibility_flags: 0,
+                            consumables: Vec::new(),
                         });
                         ship.in_aoi = true;
                         if let (Some(p), Some(r)) = (position, rotation) {
@@ -330,7 +372,36 @@ impl World {
                 }
                 _ => {}
             },
+            Event::Method { entity: "Vehicle", entity_id, method, args } => {
+                self.vehicle_method(*entity_id, method, args, clock)
+            }
             Event::Method { method, args, .. } => self.method(method, args, clock),
+        }
+    }
+
+    fn vehicle_method(&mut self, id: u32, method: &str, args: &[(&str, Value)], clock: f32) {
+        let Some(ship) = self.ships.get_mut(&id) else { return };
+        let arg = |i: usize| args.get(i).map(|(_, v)| v);
+        match method {
+            "onConsumableUsed" => {
+                // Up to 15.1 a CONSUMABLE_ID; from 15.4 a 2-byte USER_TYPE whose
+                // second byte matches the old id's work times type for type.
+                // shortcut: its first byte was always 1 and is ignored.
+                let kind = match arg(0) {
+                    Some(Value::Blob([_, kind])) => Some(i64::from(*kind)),
+                    v => i64_of(v),
+                };
+                if let (Some(kind), Some(left)) = (kind, f32_of(arg(1))) {
+                    ship.consumables.retain(|&(k, until)| k != kind && until > clock);
+                    ship.consumables.push((kind, clock + left));
+                }
+            }
+            "onConsumableInterrupted" => {
+                if let Some(kind) = i64_of(arg(0)) {
+                    ship.consumables.retain(|&(k, _)| k != kind);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -382,6 +453,30 @@ impl World {
                             self.minimap.remove(&(id as u32));
                         }
                     }
+                }
+            }
+            "receive_wardAdded" => {
+                let (Some(id), Some(position), Some(time), Some(radius)) =
+                    (int(0), vec3(arg(1)), f32_of(arg(2)), f32_of(arg(3)))
+                else {
+                    return;
+                };
+                let id = id as u64;
+                let patrol = Patrol {
+                    id,
+                    owner: int(5).unwrap_or(0) as u32,
+                    team: int(4).unwrap_or(-1),
+                    kind: int(6).unwrap_or(-1),
+                    position,
+                    radius,
+                    time,
+                    added: clock,
+                };
+                self.patrols.insert(id, patrol);
+            }
+            "receive_wardRemoved" => {
+                if let Some(id) = int(0) {
+                    self.patrols.remove(&(id as u64));
                 }
             }
             "receive_addMinimapSquadron" => {

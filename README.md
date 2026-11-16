@@ -64,9 +64,16 @@ the same output, built on this crate instead.
    `updateMinimapVisionInfo`, including ships spotted outside the area of
    interest (minimap only). Its `packedData` is x and z in 11 bits each over
    a fixed −2500..2500, yaw in 8 bits, and bit 31 for "no position".
-   Not yet: interpolation, decoding `visibilityFlags`, secondary shells,
-   buildings, weather, consumables. Torpedoes that never get a kill
-   message are dropped at 150 s until GameParams gives their range.
+   Spotting: `visibilityFlags` is non-zero while the opposing team spots
+   the ship (`Ship::spotted`; the bits are reasons, not yet named).
+   Active consumables per ship with their end time; the type is the
+   `CONSUMABLE_ID`, which from 15.4 is the second byte of a 2-byte
+   `consumableUsageParams`. Fighter patrols (`receive_wardAdded`): position,
+   radius, team, owner, until `receive_wardRemoved`.
+   Not yet: interpolation, naming the spotting reasons and consumable
+   types, consumable radii (GameParams), secondary shells, buildings (no
+   fixture has any), weather. Torpedoes that never get a kill message are
+   dropped at 150 s until GameParams gives their range.
 9. **Draw-command emitter** 🖥 — world state → the existing `format.rs` record
    tags (`SHIP`, `HEALTH_BAR`, `SHOT_TRACER`, `TORPEDO`, `SMOKE`, `PLANE`,
    `CAPTURE_POINT`, …).
@@ -143,7 +150,10 @@ flight time, median per replay. Every minimap sighting of a ship whose
 real position arrived within 0.3 s matches it within 2.5 units (one
 quantization step); headings match to a median under 0.02 rad over more
 than 10,000 sightings, and over 100 sightings are of ships outside the
-area of interest.
+area of interest. Enemies of the recording player are flagged spotted
+over 90% of their time in view and under 2% out of it, on every fixture.
+Every consumable type used at least 3 times both before and after 15.4
+shares a work time across the two encodings (at least 3 types compared).
 
 The pickle reader is checked against CPython on `tests/pickle_corpus.json`
 (regenerate with `python3 -I scripts/gen-pickle-corpus.py`).

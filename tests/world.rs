@@ -1,5 +1,6 @@
 //! Battle world over the fixture replays. Needs both fetch scripts.
 
+use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -38,6 +39,9 @@ fn world_is_consistent_on_every_fixture() {
 
     let (mut total_squadrons, mut total_torpedoes, mut total_aimed_hits) = (0usize, 0usize, 0usize);
     let (mut yaw_errors, mut minimap_only) = (Vec::new(), 0usize);
+    let mut patrols = 0usize;
+    // (consumable type, from the 15.4+ blob) -> distinct work times (f32 bits).
+    let mut consumable_times: BTreeMap<(i64, bool), HashSet<u32>> = BTreeMap::new();
     for path in files {
         let name = path.file_name().unwrap().to_string_lossy().into_owned();
         let replay = Replay::from_file(&path).unwrap();
@@ -54,9 +58,39 @@ fn world_is_consistent_on_every_fixture() {
         // Shell hits at the aim point: elapsed time over predicted flight time.
         let mut shell_timing = Vec::new();
         let mut squadron_owners = HashSet::new();
+        // Seconds enemy ships spend [in AoI, out of AoI] x [spotted, not].
+        let mut enemy_time = [[0f32; 2]; 2];
+        let blob_era = (v.major, v.minor) >= (15, 4);
 
         for p in Packets::new(&replay.packets, v) {
             let event = dec.feed(&p).unwrap();
+            let dt = p.clock - world.clock;
+            if let Some(own) = world.own_team()
+                && dt > 0.0
+            {
+                for s in world.ships.values().filter(|s| s.alive && s.team != own) {
+                    enemy_time[usize::from(!s.in_aoi)][usize::from(!s.spotted())] += dt;
+                }
+            }
+            match &event {
+                Some(Event::Method { method: "receive_wardRemoved", args, .. }) => {
+                    let id = args[0].1.as_i64().unwrap() as u64;
+                    if let Some(w) = world.patrols.get(&id) {
+                        assert!(p.clock >= w.added, "{name}: patrol removed before added: {w:?}");
+                        patrols += 1;
+                    }
+                }
+                Some(Event::Method { method: "onConsumableUsed", entity_id, args, .. }) => {
+                    let left = args[1].1.as_f32().unwrap();
+                    world.apply(&dec, &p, event.as_ref());
+                    let ship = &world.ships[entity_id];
+                    let &(kind, until) = ship.consumables.last().unwrap();
+                    assert!((until - world.clock - left).abs() < 1e-3 && ship.consumable_active(kind, world.clock));
+                    consumable_times.entry((kind, blob_era)).or_default().insert(left.to_bits());
+                    continue;
+                }
+                _ => {}
+            }
             if let Some(Event::Method { method, args, .. }) = &event {
                 let arg = |i: usize| args.get(i).map(|(_, v)| v);
                 match *method {
@@ -184,6 +218,15 @@ fn world_is_consistent_on_every_fixture() {
         total_squadrons += squadrons;
         total_torpedoes += torpedoes;
 
+        // Enemies are flagged spotted while in view and not out of it.
+        let [[in_spotted, in_hidden], [out_spotted, out_hidden]] = enemy_time;
+        let in_share = in_spotted / (in_spotted + in_hidden);
+        let out_share = out_spotted / (out_spotted + out_hidden).max(1.0);
+        assert!(in_share > 0.9 && out_share < 0.02, "{name}: spotted {in_share} in view, {out_share} out");
+        for w in world.patrols.values() {
+            assert!(w.radius > 0.0 && on_map(&w.position), "{name}: bad patrol {w:?}");
+        }
+
         // Dead reckoning stays within a few world units between syncs.
         if !torpedo_drift.is_empty() {
             let worst = torpedo_drift.iter().copied().fold(0.0, f32::max);
@@ -204,4 +247,16 @@ fn world_is_consistent_on_every_fixture() {
     let m = median(yaw_errors);
     assert!(m < 0.02, "minimap yaw off by {m} rad (median)");
     assert!(minimap_only > 100, "only {minimap_only} minimap-only sightings");
+    assert!(patrols > 0, "no fighter patrol was removed");
+    // The 15.4+ consumable blob means the same types as the old id: every
+    // type used at least 3 times in both eras shares a work time across them.
+    let mut compared = 0;
+    for (&(kind, blob), times) in consumable_times.iter().filter(|((_, blob), _)| *blob) {
+        let Some(old) = consumable_times.get(&(kind, !blob)) else { continue };
+        if times.len() >= 3 && old.len() >= 3 {
+            assert!(!times.is_disjoint(old), "consumable {kind}: no shared work time across eras");
+            compared += 1;
+        }
+    }
+    assert!(compared >= 3, "only {compared} consumable types compared across eras");
 }
