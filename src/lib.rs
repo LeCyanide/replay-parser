@@ -15,6 +15,7 @@ pub mod container;
 pub mod error;
 pub mod meta;
 pub mod packet;
+pub mod pickle;
 
 pub use container::Replay;
 pub use error::Error;
