@@ -123,7 +123,7 @@ fn installed_builds_decode_their_replays() {
                 // Draw commands: each ship once, torpedoes on the map; the recording
                 // player's ship drawn, detected, once linked and alive.
                 let labels = draw::labels(&world.players, Some(&gp), &names);
-                let cmds = draw::frame(&world, &map, &labels, world.clock);
+                let cmds = draw::frame(&world, &map, &labels, Some(&gp), &draw::Flights::new(), world.clock);
                 let mut ships = std::collections::HashSet::new();
                 let on_map = |p: &[f32; 2]| p.iter().all(|v| (-1.0..=769.0).contains(v));
                 for c in &cmds {

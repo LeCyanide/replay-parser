@@ -29,6 +29,10 @@ use crate::value::Value;
 /// 0.349–0.374); `tests/world.rs` re-measures it.
 pub const SHELL_TIME_SCALE: f32 = 0.36;
 
+/// Shells are kept this long after firing (hits do not remove them), as
+/// the old renderer keeps salvos; their tracers can outlast the estimate.
+pub const SALVO_LIFETIME: f32 = 30.0;
+
 /// Torpedoes that run out of range normally get a kill message; a few never
 /// do (about 1 in 25 on the fixtures). Those are dropped past their range
 /// times this (upgrades add up to a quarter; fitted on local 15.10 replays),
@@ -231,8 +235,18 @@ pub struct Shell {
     pub from: [f32; 3],
     pub to: [f32; 3],
     pub launched: f32,
-    /// Estimated landing clock; a hit before then removes the shell early.
+    /// Estimated landing clock.
     pub arrives: f32,
+    /// As sent (`serverTimeLeft`); about 2.8× the real flight.
+    pub server_time_left: f32,
+}
+
+/// A hit on a shell still kept: who fired it, when, and how long it flew.
+#[derive(Clone, Copy, Debug)]
+pub struct ShellHit {
+    pub owner: u32,
+    pub launched: f32,
+    pub flight: f32,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -253,7 +267,11 @@ pub struct World {
     pub minimap: BTreeMap<u32, Sighting>,
     pub patrols: BTreeMap<u64, Patrol>,
     pub torpedoes: Vec<Torpedo>,
+    /// Fired in the last [`SALVO_LIFETIME`] seconds, oldest first.
     pub shells: Vec<Shell>,
+    /// Every hit matched to a kept shell, for learning flight times.
+    #[serde(skip)]
+    pub shell_hits: Vec<ShellHit>,
     pub deaths: Vec<Death>,
     /// Torpedo range by projectile params id; see `with_params`.
     #[serde(skip)]
@@ -363,7 +381,7 @@ impl World {
         // The stream's final trailer packet carries clock 0; never go back.
         self.clock = self.clock.max(packet.clock);
         let clock = self.clock;
-        self.shells.retain(|s| s.arrives > clock);
+        self.shells.retain(|s| clock - s.launched < SALVO_LIFETIME);
         self.torpedoes.retain(|t| !t.spent(clock));
         if let Ok(decoded) = packet.decode() {
             match decoded {
@@ -653,7 +671,16 @@ impl World {
                             continue;
                         };
                         let arrives = clock + left * SHELL_TIME_SCALE;
-                        self.shells.push(Shell { owner, shot_id, params_id, from, to, launched: clock, arrives });
+                        self.shells.push(Shell {
+                            owner,
+                            shot_id,
+                            params_id,
+                            from,
+                            to,
+                            launched: clock,
+                            arrives,
+                            server_time_left: left,
+                        });
                     }
                 }
             }
@@ -662,7 +689,13 @@ impl World {
                     let owner = i64_of(pack.get("ownerID")).unwrap_or(0) as u32;
                     let ids: HashSet<i64> =
                         list(pack.get("kills")).iter().filter_map(|k| i64_of(k.get("shotID"))).collect();
-                    self.shells.retain(|s| !(s.owner == owner && ids.contains(&s.shot_id)));
+                    for &id in &ids {
+                        if let Some(s) = self.shells.iter().find(|s| s.owner == owner && s.shot_id == id)
+                            && clock > s.launched
+                        {
+                            self.shell_hits.push(ShellHit { owner, launched: s.launched, flight: clock - s.launched });
+                        }
+                    }
                     self.torpedoes.retain(|t| !(t.owner == owner && ids.contains(&t.shot_id)));
                 }
             }

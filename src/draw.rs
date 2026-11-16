@@ -13,6 +13,7 @@ use std::collections::HashSet;
 
 use crate::gameparams::GameParams;
 use crate::world::Player;
+use crate::world::ShellHit;
 use crate::world::World;
 
 /// Output pixel size, as the suite's renderer draws.
@@ -28,6 +29,11 @@ const HP_BAR_BG_COLOR: [u8; 3] = [50, 50, 50];
 const HP_BAR_BG_ALPHA: f32 = 0.7;
 const UNDETECTED_OPACITY: f32 = 0.4;
 const CAP_ALPHA: f32 = 0.15;
+/// A tracer's length as a share of the shell's path, at [`MAX_TRACER_CALIBER`]
+/// and above; smaller guns draw shorter, down to [`MIN_TRACER_RATIO`] of it.
+const TRACER_LEN: f32 = 0.12;
+const MAX_TRACER_CALIBER: f32 = 0.46;
+const MIN_TRACER_RATIO: f32 = 0.3;
 
 /// A map's playable square, from its `space.settings`.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -169,6 +175,63 @@ pub enum Draw<'a> {
         player_name: Option<&'a str>,
         ship_name: Option<&'a str>,
     },
+    /// A shell's streak, tail to head; `secondary` for the secondary battery.
+    ShotTracer {
+        from: [f32; 2],
+        to: [f32; 2],
+        color: [u8; 3],
+        secondary: bool,
+    },
+    /// The head of a [`Draw::ShotTracer`], coloured by ammo type.
+    ShotTracerTip {
+        at: [f32; 2],
+        color: [u8; 3],
+        secondary: bool,
+    },
+}
+
+/// Learned shell flight times: per shooter, (fired at, mean seconds to its
+/// hits) for each salvo that hit something, by fire time.
+pub type Flights = HashMap<u32, Vec<(f32, f32)>>;
+
+/// From [`World::shell_hits`] after a full pass over the replay: the old
+/// renderer paces tracers by these rather than by `serverTimeLeft`.
+pub fn flights(hits: &[ShellHit]) -> Flights {
+    let mut salvos: HashMap<(u32, u32), (f32, u32)> = HashMap::new();
+    for h in hits {
+        let e = salvos.entry((h.owner, h.launched.to_bits())).or_default();
+        e.0 += h.flight;
+        e.1 += 1;
+    }
+    let mut out = Flights::new();
+    for ((owner, at), (sum, n)) in salvos {
+        out.entry(owner).or_default().push((f32::from_bits(at), sum / n as f32));
+    }
+    for v in out.values_mut() {
+        v.sort_by(|a, b| a.0.total_cmp(&b.0));
+    }
+    out
+}
+
+/// The same shooter's salvo nearest in fire time, else `fallback`.
+fn flight(learned: Option<&Vec<(f32, f32)>>, fired: f32, fallback: f32) -> f32 {
+    let mut best: Option<(f32, f32)> = None;
+    for &(at, f) in learned.into_iter().flatten() {
+        let dt = (at - fired).abs();
+        if best.is_none_or(|b| dt < b.0) {
+            best = Some((dt, f));
+        }
+    }
+    best.map_or(fallback, |b| b.1)
+}
+
+/// Tracer tip by `ammoType`.
+fn ammo_color(ammo: &str) -> [u8; 3] {
+    match ammo {
+        "HE" => [255, 180, 80],
+        "CS" => [255, 100, 100],
+        _ => [140, 200, 255],
+    }
 }
 
 fn relation_color(relation: u32) -> [u8; 3] {
@@ -211,12 +274,20 @@ fn depth(buoyancy: i64) -> Option<&'static str> {
 }
 
 /// One frame at `clock` (torpedoes are dead-reckoned to it). `labels` is
-/// [`labels`] for this world's players.
+/// [`labels`] for this world's players; `flights` paces shell tracers (see
+/// [`flights`]; empty falls back to `serverTimeLeft`).
 ///
 /// Not yet, against the renderer: division mates' gold colour, the
 /// disconnected flag, name colours by loaded ammo, submarine depth in the
 /// ship name, position interpolation between packets.
-pub fn frame<'a>(world: &World, map: &MapGeometry, labels: &'a Labels, clock: f32) -> Vec<Draw<'a>> {
+pub fn frame<'a>(
+    world: &World,
+    map: &MapGeometry,
+    labels: &'a Labels,
+    gp: Option<&GameParams>,
+    flights: &Flights,
+    clock: f32,
+) -> Vec<Draw<'a>> {
     let mut out = Vec::new();
     let own = world.own_team();
     let relation = |id: u32| world.player_of(id).map(|p| world.players[p].relation);
@@ -244,6 +315,34 @@ pub fn frame<'a>(world: &World, map: &MapGeometry, labels: &'a Labels, clock: f3
             progress: c.progress,
             invader_color: (c.has_invaders && c.invader_team >= 0).then(|| team_color(c.invader_team, own)),
         });
+    }
+
+    for s in &world.shells {
+        let Some(r) = relation(s.owner) else { continue };
+        let fallback = if s.server_time_left > 0.0 { s.server_time_left } else { 3.0 };
+        let duration = flight(flights.get(&s.owner), s.launched, fallback);
+        let elapsed = clock - s.launched;
+        if elapsed < 0.0 || elapsed > duration {
+            continue;
+        }
+        let shell = gp.and_then(|gp| gp.projectiles.get(&s.params_id));
+        let len = shell
+            .and_then(|p| p.caliber)
+            .map_or(TRACER_LEN, |d| TRACER_LEN * (d / MAX_TRACER_CALIBER).clamp(MIN_TRACER_RATIO, 1.0));
+        // Secondaries come down the same path; only the ammo tells them apart.
+        let secondary = shell.is_some_and(|p| {
+            // A shooter not in view yet has its ship from the roster.
+            let ship = world.ships.get(&s.owner).map(|o| o.params_id);
+            let ship = ship.or_else(|| world.player_of(s.owner).map(|i| world.players[i].ship_params_id));
+            ship.and_then(|id| gp?.ships.get(&id)).is_some_and(|o| o.secondary_ammo.contains(&p.name))
+        });
+        let at = |f: f32| map.px(s.from[0] + (s.to[0] - s.from[0]) * f, s.from[2] + (s.to[2] - s.from[2]) * f);
+        let frac = elapsed / duration;
+        let head = at(frac);
+        out.push(Draw::ShotTracer { from: at((frac - len).max(0.0)), to: head, color: relation_color(r), secondary });
+        if let Some(p) = shell {
+            out.push(Draw::ShotTracerTip { at: head, color: ammo_color(&p.ammo_type), secondary });
+        }
     }
 
     let half = map.space_size as f32 / 2.0;
@@ -364,6 +463,20 @@ mod tests {
                      <chunkSize>50</chunkSize></root>";
         assert_eq!(MapGeometry::from_space_settings(elems), Some(MapGeometry { space_size: 700 }));
         assert_eq!(MapGeometry::from_space_settings("<x/>"), None);
+    }
+
+    #[test]
+    fn paces_tracers_by_the_nearest_learned_salvo() {
+        let hits = [(7, 10.0, 4.0), (7, 10.0, 6.0), (7, 30.0, 9.0)].map(|(owner, launched, flight)| ShellHit {
+            owner,
+            launched,
+            flight,
+        });
+        let f = flights(&hits);
+        assert_eq!(f[&7], vec![(10.0, 5.0), (30.0, 9.0)]);
+        assert_eq!(flight(f.get(&7), 18.0, 2.0), 5.0);
+        assert_eq!(flight(f.get(&7), 22.0, 2.0), 9.0);
+        assert_eq!(flight(f.get(&8), 22.0, 2.0), 2.0);
     }
 
     #[test]

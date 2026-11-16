@@ -117,7 +117,10 @@ the same output, built on this crate instead.
    toolkit freezes homing torpedoes that the server's own
    `receiveTorpedoDirection` positions show moving. Torpedoes launched
    with a turn (`maneuverDump`) run on `targetYaw` from launch (syncs
-   agree to 0.2 units). Not yet: tracers, planes, patrol and consumable
+   agree to 0.2 units). `SHOT_TRACER` and its tip (main and secondary)
+   match on every record: shells are kept 30 s like the toolkit's salvos
+   and paced by flight times learned from their hits in a first pass over
+   the replay. Not yet: planes, patrol and consumable
    circles, camera direction, buildings, buff zones, weather; division
    gold, interpolation between packets.
 10. **Parity harness** — done, in the suite: `npm run diff-timeline -- old.wtreply
@@ -129,8 +132,8 @@ the same output, built on this crate instead.
     `sidecar/patches/`, and the toolkit's licence entries; keep credit for the
     format knowledge.
 
-Next: the remaining tags in 9 one at a time, each checked with 10 (tracers
-first: the most records); buildings in 8 (none in the fixtures; Operations
+Next: the remaining tags in 9 one at a time, each checked with 10 (planes
+next); buildings in 8 (none in the fixtures; Operations
 replays have them).
 
 ## Usage

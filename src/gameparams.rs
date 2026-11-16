@@ -40,6 +40,8 @@ pub struct ShipParams {
     pub level: i64,
     /// Every consumable the ship can carry (all slots, all alternatives).
     pub consumables: Vec<ConsumableParams>,
+    /// Projectile names the secondary battery (`atba`) of any hull fires.
+    pub secondary_ammo: Vec<String>,
 }
 
 /// One variant of an ability (`PCY019_RLSSearch` / `USSR_10`), base values
@@ -92,6 +94,10 @@ pub struct ProjectileParams {
     pub max_dist: Option<f32>,
     /// Knots (torpedoes; base value).
     pub speed: Option<f32>,
+    /// `AP`, `HE`, `CS` (semi-armour-piercing), `torpedo`, …
+    pub ammo_type: String,
+    /// Calibre in metres (`bulletDiametr`; shells).
+    pub caliber: Option<f32>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -145,6 +151,37 @@ fn ship_consumables(ship: &Value, abilities: &HashMap<&str, &Value>) -> Vec<Cons
     out
 }
 
+/// `ShipUpgradeInfo: {name: {ucType: "_Hull", components: {atba: [component]}}}`;
+/// the component is a ship attribute of mounts, each with an `ammoList`.
+fn secondary_ammo(ship: &Value) -> Vec<String> {
+    let mut out = Vec::new();
+    let Some(Value::Dict(upgrades)) = ship.get("ShipUpgradeInfo").and_then(Value::attrs) else { return out };
+    for (_, u) in upgrades.iter() {
+        let Some(u) = u.attrs() else { continue };
+        if u.get("ucType").and_then(Value::as_str) != Some("_Hull") {
+            continue;
+        }
+        let atba = u.get("components").and_then(Value::attrs).and_then(|c| c.get("atba"));
+        let Some(Value::List(atba) | Value::Tuple(atba)) = atba else { continue };
+        let Some(Value::Dict(mounts)) =
+            atba.first().and_then(Value::as_str).and_then(|c| ship.get(c)).and_then(Value::attrs)
+        else {
+            continue;
+        };
+        for (_, m) in mounts.iter() {
+            let Some(Value::List(ammo) | Value::Tuple(ammo)) = m.attrs().and_then(|m| m.get("ammoList")) else {
+                continue;
+            };
+            for name in ammo.iter().filter_map(Value::as_str) {
+                if !out.iter().any(|n| n == name) {
+                    out.push(name.to_owned());
+                }
+            }
+        }
+    }
+    out
+}
+
 impl GameParams {
     /// From the raw `content/GameParams.data` bytes.
     pub fn from_data(data: &[u8]) -> Result<Self, GameParamsError> {
@@ -173,11 +210,17 @@ impl GameParams {
                     let nation = text(info.and_then(|i| i.get("nation")));
                     let level = attrs.get("level").and_then(Value::as_i64).unwrap_or(0);
                     let consumables = ship_consumables(attrs, &abilities);
-                    out.ships.insert(id, ShipParams { id, index, name, species, nation, level, consumables });
+                    let secondary_ammo = secondary_ammo(attrs);
+                    out.ships.insert(
+                        id,
+                        ShipParams { id, index, name, species, nation, level, consumables, secondary_ammo },
+                    );
                 }
                 "Projectile" => {
                     let (max_dist, speed) = (float(attrs.get("maxDist")), float(attrs.get("speed")));
-                    out.projectiles.insert(id, ProjectileParams { id, index, name, species, max_dist, speed });
+                    let (ammo_type, caliber) = (text(attrs.get("ammoType")), float(attrs.get("bulletDiametr")));
+                    out.projectiles
+                        .insert(id, ProjectileParams { id, index, name, species, max_dist, speed, ammo_type, caliber });
                 }
                 "Aircraft" => {
                     out.aircraft.insert(id, AircraftParams { id, index, name, species });

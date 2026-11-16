@@ -178,6 +178,14 @@ fn run(cmd: &str, path: &std::path::Path, scripts: Option<&std::path::Path>) -> 
             let space = res.read(&format!("{}/space.settings", replay.meta.map_name))?;
             let map = replay_parser::draw::MapGeometry::from_space_settings(&String::from_utf8_lossy(&space))
                 .ok_or("no map bounds in space.settings")?;
+            // A first pass learns shell flight times from their hits.
+            let mut decoder = EntityDecoder::new(&defs);
+            let mut world = replay_parser::world::World::new(&replay.meta).with_params(&gp);
+            for p in Packets::new(&replay.packets, version) {
+                let event = decoder.feed(&p).ok().flatten();
+                world.apply(&decoder, &p, event.as_ref());
+            }
+            let flights = replay_parser::draw::flights(&world.shell_hits);
             let mut decoder = EntityDecoder::new(&defs);
             let mut world = replay_parser::world::World::new(&replay.meta).with_params(&gp);
             let mut out = std::io::stdout().lock();
@@ -187,7 +195,7 @@ fn run(cmd: &str, path: &std::path::Path, scripts: Option<&std::path::Path>) -> 
                 world.apply(&decoder, &p, event.as_ref());
                 if world.clock >= next {
                     let labels = replay_parser::draw::labels(&world.players, Some(&gp), &names);
-                    let cmds = replay_parser::draw::frame(&world, &map, &labels, world.clock);
+                    let cmds = replay_parser::draw::frame(&world, &map, &labels, Some(&gp), &flights, world.clock);
                     writeln!(out, "{}", serde_json::json!({ "clock": world.clock, "draw": cmds }))?;
                     next = world.clock.floor() + 1.0;
                 }
