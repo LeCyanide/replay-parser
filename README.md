@@ -31,39 +31,42 @@ the same output, built on this crate instead.
    decryption, zlib, truncated-stream recovery. `probe` needs only this.
 2. **Packet framing + engine-fixed payloads** ☁ — done. Version-keyed wire-id
    table (layout shift at 12.6.0), Position, PlayerOrientation, Camera, Map,
-   Version, entity create/enter/leave/control, and method/property envelopes
-   with raw argument bytes.
-3. **BigWorld type decoder** ☁ to write (synthetic tests), 🖥 to validate.
-   `INT*/UINT*/FLOAT*/STRING/BLOB/VECTOR*`, `ARRAY`, `TUPLE`, `FIXED_DICT`
-   (incl. `AllowNone`), `USER_TYPE`, `PYTHON` (pickle), `MAILBOX`.
-4. **Python pickle reader** ☁ — needed by both `PYTHON` args and GameParams.
+   Version, entity create/enter/leave/control, and method/property envelopes.
+3. **BigWorld type decoder** ☁ — done (`value`). Verified on real packets:
+   a `USER_TYPE` is a length-prefixed blob on the wire whatever inner type it
+   declares.
+4. **Python pickle reader** ☁ — done (`pickle`). Matches CPython on a
+   279-case corpus across protocols 0–5 and Python 2 opcodes.
 5. **Game file access** 🖥 — `res_packages` `.idx/.pkg` reader, `bin/<build>`
-   selection, gettext catalog for ship names.
-6. **Entity definitions** 🖥 — `entities.xml`, `alias.xml`, `.def` files and
-   interfaces/components; property and client-method index ordering (methods
-   are ordered by argument stream size, the main source of silent drift after
-   a patch). Turns step 2's raw envelopes into named calls.
+   selection, gettext catalog for ship names. Also what lets step 6 read the
+   defs straight from the install instead of a loose `scripts/` folder.
+6. **Entity definitions + entity decoding** ☁ — done (`defs`, `entity`,
+   `nested`) from a loose `scripts/` directory (`ScriptSource` is the seam for
+   step 5). Methods, properties, creates and nested property updates decode
+   against tracked per-entity state; see Tests for what is checked.
 7. **GameParams** 🖥 — ships, artillery/torpedo/plane params, consumables, the
-   subset the simulation and labels need.
-8. **Battle world** 🖥 — the largest piece: ship state (position/heading
+   subset the simulation and labels need. The pickle reader is ready for it.
+8. **Battle world** — the largest piece: ship state (position/heading
    interpolation, health, death, visibility/spotting), shells and tracer
    timing, torpedoes, squadrons, smoke, capture points, buildings, weather,
-   consumable radii, the recording player's camera.
+   consumable radii, the recording player's camera. Much of it can be built
+   and checked here on the fixtures; what needs GameParams (ranges, shell
+   flight times, plane icons) waits for step 7.
 9. **Draw-command emitter** 🖥 — world state → the existing `format.rs` record
    tags (`SHIP`, `HEALTH_BAR`, `SHOT_TRACER`, `TORPEDO`, `SMOKE`, `PLANE`,
    `CAPTURE_POINT`, …).
-10. **Parity harness** ☁ to write, 🖥 to run — bake one replay with the current
-    sidecar and the new one, diff the two `.wtreply` files per frame and per
-    record with tolerances. This is the acceptance test for cutting over.
-11. **Patch survey** ☁ — a command that reports unknown wire ids, undecodable
-    payloads and entity-def drift for a new build, so a patch is diagnosed in
-    minutes. (`replay-dump stats` is the start of it.)
+10. **Parity harness** — done, in the suite: `npm run diff-timeline -- old.wtreply
+    new.wtreply`. Running it needs bakes from both sidecars (🖥).
+11. **Patch survey** ☁ — `replay-dump stats` (packet level) and
+    `replay-dump entities` (entity level, first failure per method/property)
+    already report what a new build breaks.
 12. **Cut-over** — sidecar depends on this crate; drop `vendor/` fetching,
     `sidecar/patches/`, and the toolkit's licence entries; keep credit for the
     format knowledge.
 
-Order of work: 3 → 4 in the cloud; then 5 → 6 → 7 locally, which unlock real
-decoding; then 8 → 9 one record tag at a time, each checked with 10.
+Next: 8 for what the replay alone determines (ships, health, smoke, caps,
+scores, deaths), then 5 → 7 locally, then 9 one record tag at a time, each
+checked with 10.
 
 ## Usage
 
@@ -72,23 +75,42 @@ cargo build --release
 ./target/release/replay-dump meta    <file.wowsreplay>   # arena info JSON
 ./target/release/replay-dump stats   <file.wowsreplay>   # packet counts, decode failures
 ./target/release/replay-dump packets <file.wowsreplay>   # one JSON line per packet
+./target/release/replay-dump entities <file.wowsreplay> <scripts dir>   # entity decode coverage
+./target/release/replay-dump events   <file.wowsreplay> <scripts dir>   # one JSON line per entity event
 ```
 
 ## Tests
 
 ```bash
-./scripts/fetch-fixtures.sh
+./scripts/fetch-fixtures.sh       # seven replays, 13.11 to 15.5
+./scripts/fetch-entity-defs.sh    # the client's scripts/ for those versions
 cargo test
 ```
 
-The fixtures are seven replays from 13.11 to 15.5, taken from the toolkit's own
-test fixtures at a pinned commit. They are not committed (other players'
-battles); the fixture tests fail, rather than pass empty, without them. On
-every fixture, every packet frames and every engine-fixed payload decodes to
-exactly its length, the stream ends with the `0xffffffff` trailer, and the
-Version and Map packets agree with the arena info.
+Neither set is committed: the replays are other players' battles (taken from
+the toolkit's test fixtures, MIT), and the entity defs are game files (taken
+from Monstrofil/replays_unpack, which carries them per version). Both are
+pinned to one commit. Tests that need them fail, rather than pass empty,
+without them.
 
-No pre-12.6 replay is in the corpus, so the legacy wire-id table is unverified.
+On every fixture:
+
+- every packet frames and every engine-fixed payload decodes to exactly its
+  length; the stream ends with the `0xffffffff` trailer; the Version and Map
+  packets agree with the arena info;
+- every entity packet — about 540,000 across the seven — decodes with no
+  bytes left over, including every nested property update;
+- the content cross-checks: vehicle teams are 0/1 and health is within max;
+  `timeLeft` counts down (pre-battle countdown, then the time limit from the
+  arena info); team scores and capture progress are in range; and every
+  vehicle in the arena info appears, by avatar id and ship id, in the pickled
+  rosters of `onArenaStateReceived`.
+
+The pickle reader is checked against CPython on `tests/pickle_corpus.json`
+(regenerate with `python3 -I scripts/gen-pickle-corpus.py`).
+
+No pre-12.6 replay is in the corpus, so the legacy wire-id table is
+unverified, and no 15.6+ replay is, so the newest builds are not covered.
 
 ## Credits
 
