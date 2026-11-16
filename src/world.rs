@@ -77,6 +77,11 @@ pub struct Ship {
     /// as a fraction of a turn from −π. Only from updates, not the create
     /// packet, as the old renderer reads it.
     pub aim_yaw: Option<f32>,
+    /// `selectedWeapon`: 0 main guns, 1 secondaries, 2 torpedoes, 3
+    /// planes, 6 sonar (ships.xml `SHIP_WEAPON_TYPES`).
+    pub weapon: Option<i64>,
+    /// The main guns' loaded shell (`setAmmoForWeapon`), a GameParams id.
+    pub ammo: Option<i64>,
 }
 
 impl Ship {
@@ -121,6 +126,11 @@ pub struct Player {
     /// The roster's `prebattleId`: a division's members share one; 0 for
     /// solo players and bots.
     pub division: i64,
+    /// The roster's `isConnected`, as last sent.
+    pub connected: bool,
+    /// The last connection change shown, as the old renderer records them:
+    /// from the first time the player is seen connected.
+    pub connection: Option<bool>,
     /// Every integer in this player's `onArenaStateReceived` roster entry.
     /// The entry's keys are version-specific indices (players and bots use
     /// different ones), so a ship is linked by finding its Vehicle entity id
@@ -305,7 +315,7 @@ pub struct World {
     /// Clan battles draw no division colours.
     pub clan_battle: bool,
     #[serde(skip)]
-    prebattle_key: Option<i64>,
+    roster_keys: Option<RosterKeys>,
     pub time_left: Option<i64>,
     pub battle_stage: Option<i64>,
     /// Indexed by team id.
@@ -380,30 +390,50 @@ fn list<'v, 'a>(v: Option<&'v Value<'a>>) -> &'v [Value<'a>] {
     }
 }
 
-/// The roster index of a human player's `prebattleId`, by client version
-/// (the old renderer's table; the keys are the field names sorted, and
-/// fields added over time shift it).
-fn prebattle_key(v: (u32, u32, u32)) -> i64 {
-    match v {
-        v if v >= (15, 10, 0) => 30,
-        v if v >= (0, 11, 11) => 29,
-        v if v >= (0, 10, 9) => 28,
-        v if v >= (0, 10, 7) => 27,
-        _ => 26,
-    }
+/// Indices of a human player's roster fields.
+#[derive(Clone, Copy, Debug, Default)]
+struct RosterKeys {
+    id: i64,
+    connected: i64,
+    prebattle: i64,
 }
 
-/// An integer field of a roster entry, a list of `(key, value)` tuples.
-fn roster_int(entry: &pickle::Value, key: i64) -> Option<i64> {
+/// The roster keys by client version (the old renderer's table; the keys
+/// are the field names sorted, and fields added over time shift them).
+fn roster_keys(v: (u32, u32, u32)) -> RosterKeys {
+    let (id, connected, prebattle) = match v {
+        v if v >= (15, 10, 0) => (12, 18, 30),
+        v if v >= (0, 11, 11) => (11, 17, 29),
+        v if v >= (0, 10, 9) => (11, 17, 28),
+        v if v >= (0, 10, 7) => (10, 16, 27),
+        _ => (10, 15, 26),
+    };
+    RosterKeys { id, connected, prebattle }
+}
+
+/// A field of a roster entry, a list of `(key, value)` tuples.
+fn roster_field(entry: &pickle::Value, key: i64) -> Option<&pickle::Value> {
     use pickle::Value as P;
     let P::List(fields) = entry else { return None };
     fields.iter().find_map(|f| match f {
-        P::Tuple(kv) if matches!(kv.first(), Some(P::Int(k)) if *k == key) => match kv.get(1) {
-            Some(P::Int(v)) => Some(*v),
-            _ => None,
-        },
+        P::Tuple(kv) if matches!(kv.first(), Some(P::Int(k)) if *k == key) => kv.get(1),
         _ => None,
     })
+}
+
+fn roster_int(entry: &pickle::Value, key: i64) -> Option<i64> {
+    match roster_field(entry, key)? {
+        pickle::Value::Int(v) => Some(*v),
+        _ => None,
+    }
+}
+
+fn roster_bool(entry: &pickle::Value, key: i64) -> Option<bool> {
+    match roster_field(entry, key)? {
+        pickle::Value::Bool(b) => Some(*b),
+        pickle::Value::Int(i) => Some(*i != 0),
+        _ => None,
+    }
 }
 
 fn pickle_ints(v: &pickle::Value, out: &mut HashSet<i64>) {
@@ -438,12 +468,14 @@ impl World {
                 relation: v.relation,
                 meta_id: v.id,
                 division: 0,
+                connected: false,
+                connection: None,
                 roster: HashSet::new(),
             })
             .collect();
         let clan_battle = meta.game_type.as_deref() == Some("ClanBattle");
-        let prebattle_key = meta.version().ok().map(|v| prebattle_key((v.major, v.minor, v.patch)));
-        Self { players, clan_battle, prebattle_key, ..Self::default() }
+        let roster_keys = meta.version().ok().map(|v| roster_keys((v.major, v.minor, v.patch)));
+        Self { players, clan_battle, roster_keys, ..Self::default() }
     }
 
     /// Uses GameParams for torpedo ranges.
@@ -535,6 +567,8 @@ impl World {
                             params_id: 0,
                             buoyancy: 0,
                             aim_yaw: None,
+                            weapon: None,
+                            ammo: None,
                         });
                         ship.in_aoi = true;
                         if let (Some(p), Some(r)) = (position, rotation) {
@@ -645,6 +679,7 @@ impl World {
         let Some(ship) = self.ships.get_mut(&id) else { return };
         let arg = |i: usize| args.get(i).map(|(_, v)| v);
         match method {
+            "setAmmoForWeapon" if i64_of(arg(0)) == Some(0) => ship.ammo = i64_of(arg(1)).or(ship.ammo),
             "onConsumableUsed" => {
                 // Up to 15.1 a CONSUMABLE_ID; from 15.4 a 2-byte USER_TYPE whose
                 // second byte matches the old id's work times type for type.
@@ -706,14 +741,31 @@ impl World {
                             .find(|p| ints.contains(&p.meta_id) && ints.contains(&p.ship_params_id))
                         {
                             p.roster = ints;
-                            if matches!(*name, "playersStates" | "playersData") {
-                                p.division = self.prebattle_key.and_then(|k| roster_int(entry, k)).unwrap_or(0);
+                            if let ("playersStates" | "playersData", Some(k)) = (*name, self.roster_keys) {
+                                p.division = roster_int(entry, k.prebattle).unwrap_or(0);
+                                p.connected = roster_bool(entry, k.connected).unwrap_or(false);
+                                if p.connected && p.connection.is_none() {
+                                    p.connection = Some(true);
+                                }
                             }
                         }
                     }
                 }
                 let ids: Vec<u32> = self.ships.keys().copied().collect();
                 ids.into_iter().for_each(|id| self.link(id));
+            }
+            // Roster changes: a player's connection.
+            "onGameRoomStateChanged" => {
+                let (Some(k), Some((_, Value::Blob(b)))) = (self.roster_keys, args.first()) else { return };
+                let Ok(pickle::Value::List(entries)) = pickle::from_slice(b) else { return };
+                for entry in entries.iter() {
+                    let Some(id) = roster_int(entry, k.id) else { continue };
+                    let Some(p) = self.players.iter_mut().find(|p| p.meta_id == id) else { continue };
+                    p.connected = roster_bool(entry, k.connected).unwrap_or(p.connected);
+                    if p.connected || p.connection.is_some() {
+                        p.connection = Some(p.connected);
+                    }
+                }
             }
             // The second list was empty on every fixture; meaning unknown.
             "updateMinimapVisionInfo" => {
@@ -954,6 +1006,7 @@ impl World {
                 s.max_health = f32_of(prop("maxHealth")).unwrap_or(s.max_health);
                 s.visibility_flags = i64_of(prop("visibilityFlags")).unwrap_or(s.visibility_flags);
                 s.buoyancy = i64_of(prop("buoyancyCurrentState")).unwrap_or(s.buoyancy);
+                s.weapon = i64_of(prop("selectedWeapon")).or(s.weapon);
                 // shipConfig: u32 version, then the ship's GameParams id. Older
                 // builds send a dict with `shipId` instead.
                 match prop("shipConfig") {
@@ -1032,9 +1085,9 @@ mod tests {
         use std::rc::Rc;
         let field = |k, v| P::Tuple(Rc::new(vec![P::Int(k), v]));
         let entry = P::List(Rc::new(vec![field(29, P::Int(7)), field(30, P::Int(941459372)), field(31, P::None)]));
-        let key = super::prebattle_key((15, 10, 0));
+        let key = super::roster_keys((15, 10, 0)).prebattle;
         assert_eq!(super::roster_int(&entry, key), Some(941459372));
-        assert_eq!(super::prebattle_key((15, 9, 0)), 29);
+        assert_eq!(super::roster_keys((15, 9, 0)).prebattle, 29);
         assert_eq!(super::roster_int(&entry, 31), None);
     }
 

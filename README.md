@@ -108,10 +108,14 @@ the same output, built on this crate instead.
    `claude/keen-hawking-k8h8pf` of tactics-suite). Diffed against the
    toolkit bake (10) on five local 15.10 replays (two Operations, three
    randoms): same frame count, and `CAPTURE_POINT`, `SMOKE` and
-   `DEAD_SHIP` match on every record (9 dead-ship positions aside);
-   `SHIP` pairs on every record with positions, yaw, species, names and
-   colours matching, differing only in the ammo name colour and the
-   disconnected flag, both not built yet; `HEALTH_BAR` matches except
+   `DEAD_SHIP` match on every record;
+   `SHIP` pairs on every record with positions, yaw, species, names,
+   colours, the name colour (`selectedWeapon`; main guns by the shell
+   from `setAmmoForWeapon`) and the disconnected flag (the roster's
+   `isConnected` from `onGameRoomStateChanged`, counted from the first
+   time the player is seen connected) matching, bar one frame where a
+   change lands on the frame boundary and 4 positions on Sleeping Giant;
+   `HEALTH_BAR` matches except
    0.4–1.7% of bars the toolkit draws for enemies before their entity
    exists (rule not worked out; allies get a full bar from the roster);
    `TORPEDO` matches on the randoms, and differs on Operations where the
@@ -165,7 +169,7 @@ the same output, built on this crate instead.
     format knowledge.
 
 Next: the remaining tags in 9 one at a time, each checked with 10
-(the ship name colour by loaded ammo and the disconnected flag next).
+(the toolkit's early enemy health bars next).
 
 ## Usage
 

@@ -15,6 +15,7 @@ use crate::gameparams::AircraftParams;
 use crate::gameparams::GameParams;
 use crate::world::Player;
 use crate::world::ShellHit;
+use crate::world::Ship;
 use crate::world::World;
 
 /// Output pixel size, as the suite's renderer draws.
@@ -186,6 +187,11 @@ pub enum Draw<'a> {
         ship_name: Option<Cow<'a, str>>,
         /// An ally (or the recording player) the enemy currently spots.
         is_detected_teammate: bool,
+        /// The player's client has dropped.
+        is_disconnected: bool,
+        /// The selected weapon (main guns: by the loaded shell), detected
+        /// ships only.
+        name_color: Option<[u8; 3]>,
     },
     /// Where a ship's guns point: a line from the ship.
     CameraDirection {
@@ -292,6 +298,18 @@ fn flight(learned: Option<&Vec<(f32, f32)>>, fired: f32, fallback: f32) -> f32 {
 }
 
 /// Tracer tip by `ammoType`.
+/// A ship name's colour by the selected weapon, as the old renderer's.
+fn name_color(ship: &Ship, gp: Option<&GameParams>) -> Option<[u8; 3]> {
+    match ship.weapon? {
+        0 => Some(ammo_color(&gp?.projectiles.get(&ship.ammo?)?.ammo_type)),
+        1 => Some(ammo_color("HE")),
+        2 => Some([100, 255, 160]),
+        3 => Some([200, 160, 255]),
+        6 => Some([100, 220, 255]),
+        _ => None,
+    }
+}
+
 fn ammo_color(ammo: &str) -> [u8; 3] {
     match ammo {
         "HE" => [255, 180, 80],
@@ -560,6 +578,7 @@ pub fn frame<'a>(
     }
 
     let dead: HashSet<u32> = world.deaths.iter().map(|d| d.victim).collect();
+    let disconnected = |id: u32| world.player_of(id).is_some_and(|p| world.players[p].connection == Some(false));
     let ids: std::collections::BTreeSet<u32> = world.ships.keys().chain(world.minimap.keys()).copied().collect();
     for &id in ids.iter().filter(|id| !dead.contains(id)) {
         let ship = world.ships.get(&id);
@@ -591,6 +610,8 @@ pub fn frame<'a>(
                     None => Cow::Borrowed(n),
                 }),
                 is_detected_teammate: rel != 2 && ship.is_some_and(|s| s.spotted()),
+                is_disconnected: disconnected(id),
+                name_color: ship.and_then(|s| name_color(s, gp)),
             });
             // A rostered ship whose entity has not arrived yet: the old
             // renderer draws a full bar for allies, and for some enemies by a
@@ -623,6 +644,8 @@ pub fn frame<'a>(
                 player_name: None,
                 ship_name: None,
                 is_detected_teammate: false,
+                is_disconnected: disconnected(id),
+                name_color: None,
             });
         }
     }
