@@ -32,6 +32,7 @@ const UNDETECTED_OPACITY: f32 = 0.4;
 const CAP_ALPHA: f32 = 0.15;
 const PATROL_ALPHA: f32 = 0.12;
 const CONSUMABLE_ALPHA: f32 = 0.15;
+const CAMERA_LINE: i32 = 18;
 /// A tracer's length as a share of the shell's path, at [`MAX_TRACER_CALIBER`]
 /// and above; smaller guns draw shorter, down to [`MIN_TRACER_RATIO`] of it.
 const TRACER_LEN: f32 = 0.12;
@@ -160,6 +161,16 @@ pub enum Draw<'a> {
         ship_name: Option<Cow<'a, str>>,
         /// An ally (or the recording player) the enemy currently spots.
         is_detected_teammate: bool,
+    },
+    /// Where a ship's guns point: a line from the ship.
+    CameraDirection {
+        entity_id: u32,
+        pos: [f32; 2],
+        /// Screen angle, as [`Draw::Ship`]'s.
+        yaw: f32,
+        color: [u8; 3],
+        /// Pixels.
+        length: i32,
     },
     HealthBar {
         entity_id: u32,
@@ -527,6 +538,18 @@ pub fn frame<'a>(
                 is_detected_teammate: false,
             });
         }
+    }
+
+    // Where the guns point, for ships the minimap shows (aim is stale otherwise).
+    for (&id, s) in world.ships.iter().filter(|(id, _)| !dead.contains(id)) {
+        let (Some(aim), Some(m)) = (s.aim_yaw, world.minimap.get(&id).filter(|m| m.visible)) else { continue };
+        out.push(Draw::CameraDirection {
+            entity_id: id,
+            pos: if s.in_aoi { map.px(s.position.x, s.position.z) } else { map.px(m.position[0], m.position[1]) },
+            yaw: screen(aim),
+            color: relation_color(relation(id).unwrap_or(2)),
+            length: CAMERA_LINE,
+        });
     }
 
     for d in &world.deaths {

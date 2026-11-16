@@ -71,6 +71,10 @@ pub struct Ship {
     /// `buoyancyCurrentState`: 0 surface, 1 periscope, 2 30 m, 3 60 m,
     /// 4 60 m and invulnerable.
     pub buoyancy: i64,
+    /// Where the guns are laid, world yaw: the low byte of `targetLocalPos`
+    /// as a fraction of a turn from −π. Only from updates, not the create
+    /// packet, as the old renderer reads it.
+    pub aim_yaw: Option<f32>,
 }
 
 impl Ship {
@@ -416,6 +420,7 @@ impl World {
                             consumables: Vec::new(),
                             params_id: 0,
                             buoyancy: 0,
+                            aim_yaw: None,
                         });
                         ship.in_aoi = true;
                         if let (Some(p), Some(r)) = (position, rotation) {
@@ -447,6 +452,11 @@ impl World {
                     _ => {}
                 }
                 self.refresh(dec, entity_id, entity);
+            }
+            Event::Property { entity_id, entity: "Vehicle", property: "targetLocalPos", value } => {
+                if let (Some(s), Some(v)) = (self.ships.get_mut(entity_id), i64_of(Some(value))) {
+                    s.aim_yaw = Some((v & 0xFF) as f32 / 256.0 * std::f32::consts::TAU - std::f32::consts::PI);
+                }
             }
             Event::Property { entity_id, entity, .. } | Event::Nested { entity_id, entity, .. } => {
                 self.refresh(dec, *entity_id, entity)

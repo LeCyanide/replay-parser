@@ -129,8 +129,9 @@ the same output, built on this crate instead.
    ids and reads 15.10's id 42 (submarine locator) as a plane smoke
    generator; and it has no radius for an Operations bot's radar (bots
    have no roster entry, and it only looks at their equipped abilities,
-   taking whichever variant a `HashMap` yields first). Not yet: camera
-   direction, buildings, buff zones, weather; division gold,
+   taking whichever variant a `HashMap` yields first). `CAMERA_DIRECTION`
+   (the low byte of `targetLocalPos` updates) matches on every record.
+   Not yet: buildings, buff zones, weather; division gold,
    interpolation between packets.
 10. **Parity harness** — done, in the suite: `npm run diff-timeline -- old.wtreply
     new.wtreply`. Running it needs bakes from both sidecars (🖥).
@@ -142,7 +143,7 @@ the same output, built on this crate instead.
     format knowledge.
 
 Next: the remaining tags in 9 one at a time, each checked with 10
-(camera direction next); buildings in 8 (none in the fixtures; Operations
+(buildings next: Operations replays have them); buildings in 8 (none in the fixtures; Operations
 replays have them).
 
 ## Usage
