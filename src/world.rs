@@ -158,6 +158,18 @@ pub struct Smoke {
     pub points: Vec<[f32; 3]>,
 }
 
+/// A fixed structure (Operations): AA, coastal guns, airfields, …. Kept
+/// once created, as the minimap keeps showing it.
+#[derive(Clone, Debug, Serialize)]
+pub struct Building {
+    pub position: [f32; 3],
+    pub team: i64,
+    pub params_id: i64,
+    pub alive: bool,
+    pub hidden: bool,
+    pub suppressed: bool,
+}
+
 /// A squadron as the minimap shows it.
 #[derive(Clone, Debug, Serialize)]
 pub struct Squadron {
@@ -264,6 +276,7 @@ pub struct World {
     pub players: Vec<Player>,
     pub ships: BTreeMap<u32, Ship>,
     pub caps: BTreeMap<u32, CapturePoint>,
+    pub buildings: BTreeMap<u32, Building>,
     pub smokes: BTreeMap<u32, Smoke>,
     pub squadrons: BTreeMap<u64, Squadron>,
     /// By Vehicle entity id, which may not be in `ships` yet. Kept, marked
@@ -427,6 +440,21 @@ impl World {
                             ship.position = *p;
                             ship.yaw = r.yaw;
                             ship.seen = clock;
+                        }
+                    }
+                    "Building" => {
+                        if let Some(p) = position {
+                            self.buildings.insert(
+                                entity_id,
+                                Building {
+                                    position: [p.x, p.y, p.z],
+                                    team: -1,
+                                    params_id: 0,
+                                    alive: true,
+                                    hidden: false,
+                                    suppressed: false,
+                                },
+                            );
                         }
                     }
                     "InteractiveZone" => {
@@ -785,6 +813,15 @@ impl World {
                 c.has_invaders = i64_of(logic.and_then(|l| l.get("hasInvaders"))).unwrap_or(0) != 0;
                 c.enabled = i64_of(logic.and_then(|l| l.get("isEnabled"))).is_none_or(|e| e != 0);
                 c.kind = i64_of(cp.and_then(|p| p.get("type"))).unwrap_or(c.kind);
+            }
+            "Building" => {
+                let Some(b) = self.buildings.get_mut(&id) else { return };
+                let flag = |name, was| i64_of(prop(name)).map_or(was, |v| v != 0);
+                b.team = i64_of(prop("teamId")).unwrap_or(b.team);
+                b.params_id = i64_of(prop("paramsId")).unwrap_or(b.params_id);
+                b.alive = flag("isAlive", b.alive);
+                b.hidden = flag("isHidden", b.hidden);
+                b.suppressed = flag("isSuppressed", b.suppressed);
             }
             "SmokeScreen" => {
                 // `bcRadius` is a bounding circle that grows with the screen; each

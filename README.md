@@ -89,8 +89,9 @@ the same output, built on this crate instead.
    `consumableUsageParams`. Fighter patrols (`receive_wardAdded`): position,
    radius, team, owner, until `receive_wardRemoved` (on the local 15.x
    replays every ward is a submarine's, kind 2, 3.5 km).
-   Not yet: interpolation, naming the spotting reasons, secondary shells, buildings (no
-   fixture has any), weather. Torpedoes that never get a kill message are
+   Buildings (Operations) are kept from their create packet on, with
+   `isAlive`/`isSuppressed` kept current. Not yet: interpolation, naming
+   the spotting reasons, weather. Torpedoes that never get a kill message are
    dropped past 1.3 × their GameParams range (`World::with_params`), or at
    150 s without GameParams.
 9. **Draw-command emitter** 🖥 — world state → the existing `format.rs` record
@@ -131,8 +132,11 @@ the same output, built on this crate instead.
    have no roster entry, and it only looks at their equipped abilities,
    taking whichever variant a `HashMap` yields first). `CAMERA_DIRECTION`
    (the low byte of `targetLocalPos` updates) matches on every record.
-   Not yet: buildings, buff zones, weather; division gold,
-   interpolation between packets.
+   `BUILDING` matches on every record of the Operation (none of its
+   buildings dies; the toolkit never updates a building after its create
+   packet, so ours would differ once one is destroyed, showing it dead).
+   Not yet: buff zones, weather; division gold, interpolation between
+   packets.
 10. **Parity harness** — done, in the suite: `npm run diff-timeline -- old.wtreply
     new.wtreply`. Running it needs bakes from both sidecars (🖥).
 11. **Patch survey** ☁ — `replay-dump stats` (packet level) and
@@ -143,8 +147,7 @@ the same output, built on this crate instead.
     format knowledge.
 
 Next: the remaining tags in 9 one at a time, each checked with 10
-(buildings next: Operations replays have them); buildings in 8 (none in the fixtures; Operations
-replays have them).
+(buff zones and weather next).
 
 ## Usage
 

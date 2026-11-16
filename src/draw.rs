@@ -135,6 +135,16 @@ pub enum Draw<'a> {
         progress: f32,
         invader_color: Option<[u8; 3]>,
     },
+    Building {
+        pos: [f32; 2],
+        color: [u8; 3],
+        is_alive: bool,
+        /// Icon by GameParams species: `airbase`, `air_defence`, `artillery`,
+        /// `generator`, `radar`, `station`, `supply`, `tower`.
+        icon: Option<&'static str>,
+        /// `ally`, `enemy`, `neutral`, `dead`, or `suppressed_` and a side.
+        relation: &'static str,
+    },
     Torpedo {
         pos: [f32; 2],
         color: [u8; 3],
@@ -344,6 +354,20 @@ fn consumable_color(kind: &str, friendly: bool) -> [u8; 3] {
     }
 }
 
+fn building_icon(species: &str) -> Option<&'static str> {
+    Some(match species {
+        "AirBase" => "airbase",
+        "AntiAircraft" => "air_defence",
+        "CoastalArtillery" | "Complex" => "artillery",
+        "Generator" => "generator",
+        "SensorTower" => "radar",
+        "SpaceStation" => "station",
+        "Military" => "supply",
+        "RayTower" => "tower",
+        _ => return None,
+    })
+}
+
 fn relation_color(relation: u32) -> [u8; 3] {
     match relation {
         0 => SELF_COLOR,
@@ -470,6 +494,28 @@ pub fn frame<'a>(
             let radius = map.len(s.radius).max(3);
             out.push(Draw::Smoke { pos: map.px(p[0], p[2]), radius, color: SMOKE_COLOR, alpha: SMOKE_ALPHA });
         }
+    }
+
+    for b in world.buildings.values().filter(|b| !b.hidden) {
+        let side = match (b.team, own) {
+            (t, _) if t < 0 => "neutral",
+            (t, Some(o)) if t == o => "ally",
+            _ => "enemy",
+        };
+        let relation = match (b.alive, b.suppressed, side) {
+            (false, ..) => "dead",
+            (_, true, "neutral") => "suppressed_neutral",
+            (_, true, "ally") => "suppressed_ally",
+            (_, true, _) => "suppressed_enemy",
+            (_, false, side) => side,
+        };
+        out.push(Draw::Building {
+            pos: map.px(b.position[0], b.position[2]),
+            color: if b.alive { team_color(b.team, own) } else { [40, 40, 40] },
+            is_alive: b.alive,
+            icon: gp.and_then(|gp| gp.buildings.get(&b.params_id)).and_then(|s| building_icon(s)),
+            relation,
+        });
     }
 
     let dead: HashSet<u32> = world.deaths.iter().map(|d| d.victim).collect();

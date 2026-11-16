@@ -119,6 +119,8 @@ pub struct GameParams {
     pub ships: HashMap<i64, ShipParams>,
     pub projectiles: HashMap<i64, ProjectileParams>,
     pub aircraft: HashMap<i64, AircraftParams>,
+    /// Building species (`AirBase`, `AntiAircraft`, `CoastalArtillery`, …).
+    pub buildings: HashMap<i64, String>,
 }
 
 fn text(v: Option<&Value>) -> String {
@@ -226,6 +228,9 @@ impl GameParams {
                     let (ammo_type, caliber) = (text(attrs.get("ammoType")), float(attrs.get("bulletDiametr")));
                     out.projectiles
                         .insert(id, ProjectileParams { id, index, name, species, max_dist, speed, ammo_type, caliber });
+                }
+                "Building" => {
+                    out.buildings.insert(id, species);
                 }
                 "Aircraft" => {
                     let subtypes = match attrs.get("planeSubtype") {
