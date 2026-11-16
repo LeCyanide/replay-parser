@@ -122,8 +122,12 @@ the same output, built on this crate instead.
    and paced by flight times learned from their hits in a first pass over
    the replay. `PLANE` (icon key from the aircraft's species, subtype and
    bomb ammo; owner names except on consumable planes) and fighter
-   `PATROL_RADIUS` match on every record. Not yet: consumable circles,
-   camera direction, buildings, buff zones, weather; division gold,
+   `PATROL_RADIUS` match on every record. `CONSUMABLE_RADIUS` matches on
+   two replays; on two others we draw circles the toolkit does not: a
+   bot's radar (Operations; the toolkit takes bots' radii from the
+   shipConfig's equipped abilities, not parsed yet) and a submarine
+   locator (id 42; its consumable id table may differ). Not yet: camera
+   direction, buildings, buff zones, weather; division gold,
    interpolation between packets.
 10. **Parity harness** — done, in the suite: `npm run diff-timeline -- old.wtreply
     new.wtreply`. Running it needs bakes from both sidecars (🖥).
@@ -135,7 +139,7 @@ the same output, built on this crate instead.
     format knowledge.
 
 Next: the remaining tags in 9 one at a time, each checked with 10
-(consumable circles next); buildings in 8 (none in the fixtures; Operations
+(the two consumable-circle gaps first); buildings in 8 (none in the fixtures; Operations
 replays have them).
 
 ## Usage

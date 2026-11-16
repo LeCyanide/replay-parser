@@ -52,8 +52,8 @@ pub struct ConsumableParams {
     /// replays use.
     pub kind: String,
     pub work_time: f32,
-    /// Area in world units: detection range for radar, hydroacoustic search
-    /// and the submarine locator (`distShip`), patrol radius for fighters.
+    /// Area in world units: patrol radius for fighters, else the detection
+    /// range (`distShip`; the hydrophone's `hydrophoneWaveRadius`).
     pub radius: Option<f32>,
 }
 
@@ -146,9 +146,9 @@ fn ship_consumables(ship: &Value, abilities: &HashMap<&str, &Value>) -> Vec<Cons
             let logic = v.get("logic").and_then(Value::attrs);
             let field = |k| float(logic.and_then(|l| l.get(k)));
             let radius = match kind.as_str() {
-                "rls" | "sonar" | "submarineLocator" => field("distShip"),
                 "fighter" | "callFighters" | "planeTacticalFighters" => field("radius"),
-                _ => None,
+                // The hydrophone's wave radius is in metres.
+                _ => field("hydrophoneWaveRadius").map(|m| m / 30.0).or_else(|| field("distShip")),
             };
             out.push(ConsumableParams { kind, work_time: float(v.get("workTime")).unwrap_or(0.0), radius });
         }

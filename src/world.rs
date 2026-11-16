@@ -354,10 +354,10 @@ impl World {
         self
     }
 
-    /// The area of a consumable type (`Ship::consumables` ids) on a linked
-    /// ship, in world units, base value; needs `with_params`.
+    /// The area of a consumable type (`Ship::consumables` ids) on a ship, in
+    /// world units, base value; needs `with_params`.
     pub fn consumable_radius(&self, ship: &Ship, kind: i64) -> Option<f32> {
-        let params = self.players.get(ship.player?)?.ship_params_id;
+        let params = ship.player.and_then(|p| self.players.get(p)).map_or(ship.params_id, |p| p.ship_params_id);
         let name = crate::gameparams::consumable_type(kind)?;
         self.consumable_radii.get(&(params, name.to_owned())).copied()
     }

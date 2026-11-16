@@ -31,6 +31,7 @@ const HP_BAR_BG_ALPHA: f32 = 0.7;
 const UNDETECTED_OPACITY: f32 = 0.4;
 const CAP_ALPHA: f32 = 0.15;
 const PATROL_ALPHA: f32 = 0.12;
+const CONSUMABLE_ALPHA: f32 = 0.15;
 /// A tracer's length as a share of the shell's path, at [`MAX_TRACER_CALIBER`]
 /// and above; smaller guns draw shorter, down to [`MIN_TRACER_RATIO`] of it.
 const TRACER_LEN: f32 = 0.12;
@@ -190,6 +191,15 @@ pub enum Draw<'a> {
         color: [u8; 3],
         secondary: bool,
     },
+    /// An active consumable's area (radar, hydroacoustic search, …) around
+    /// its ship.
+    ConsumableRadius {
+        entity_id: u32,
+        pos: [f32; 2],
+        radius: i32,
+        color: [u8; 3],
+        alpha: f32,
+    },
     /// A fighter patrol's circle.
     PatrolRadius {
         plane_id: u64,
@@ -305,6 +315,22 @@ fn plane_icon(a: Option<&AircraftParams>) -> (String, bool) {
         (Some(_), false) => with("fighter"),
     };
     (format!("{dir}/{base}"), consumable)
+}
+
+/// A consumable circle's colour by type, friendly or not.
+fn consumable_color(kind: &str, friendly: bool) -> [u8; 3] {
+    match (kind, friendly) {
+        ("rls", true) => [40, 80, 200],
+        ("rls", false) => [180, 40, 50],
+        ("sonar", true) => [40, 180, 170],
+        ("sonar", false) => [200, 90, 30],
+        ("hydrophone", true) => [70, 110, 180],
+        ("hydrophone", false) => [170, 70, 50],
+        ("submarineLocator", true) => [60, 60, 190],
+        ("submarineLocator", false) => [160, 30, 60],
+        (_, true) => ALLY_COLOR,
+        (_, false) => ENEMY_COLOR,
+    }
 }
 
 fn relation_color(relation: u32) -> [u8; 3] {
@@ -520,6 +546,29 @@ pub fn frame<'a>(
             player_name: l.map(|l| l.player.as_str()),
             ship_name: l.and_then(|l| l.ship.as_deref()),
         });
+    }
+
+    for (&id, ship) in world.ships.iter().filter(|(id, _)| !dead.contains(id)) {
+        // Only ships the minimap shows; the world position while in view.
+        let Some(m) = world.minimap.get(&id).filter(|m| m.visible) else { continue };
+        let pos =
+            if ship.in_aoi { map.px(ship.position.x, ship.position.z) } else { map.px(m.position[0], m.position[1]) };
+        let friendly = relation(id).unwrap_or(2) < 2;
+        for &(kind, until) in &ship.consumables {
+            let Some(name) = crate::gameparams::consumable_type(kind) else { continue };
+            // Fighters' circles are their patrols, drawn with the planes.
+            if until <= clock || name == "fighter" || name == "callFighters" {
+                continue;
+            }
+            let Some(r) = world.consumable_radius(ship, kind) else { continue };
+            out.push(Draw::ConsumableRadius {
+                entity_id: id,
+                pos,
+                radius: map.len(r),
+                color: consumable_color(name, friendly),
+                alpha: CONSUMABLE_ALPHA,
+            });
+        }
     }
 
     for sq in world.squadrons.values() {
