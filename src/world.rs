@@ -118,6 +118,9 @@ pub struct Player {
     pub relation: u32,
     /// The arena info's `id`; see [`crate::meta::VehicleMeta::id`].
     pub meta_id: i64,
+    /// The roster's `prebattleId`: a division's members share one; 0 for
+    /// solo players and bots.
+    pub division: i64,
     /// Every integer in this player's `onArenaStateReceived` roster entry.
     /// The entry's keys are version-specific indices (players and bots use
     /// different ones), so a ship is linked by finding its Vehicle entity id
@@ -133,6 +136,10 @@ pub struct Death {
     pub killer: u32,
     /// The game's death-reason code; names need GameParams-era tables.
     pub reason: i64,
+    /// World x, z where the victim died: its ship's position then if in
+    /// view, else its minimap sighting's (the wreck stays there; the entity
+    /// may drift on).
+    pub position: Option<[f32; 2]>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -295,6 +302,10 @@ pub struct ShellHit {
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct World {
     pub clock: f32,
+    /// Clan battles draw no division colours.
+    pub clan_battle: bool,
+    #[serde(skip)]
+    prebattle_key: Option<i64>,
     pub time_left: Option<i64>,
     pub battle_stage: Option<i64>,
     /// Indexed by team id.
@@ -369,6 +380,32 @@ fn list<'v, 'a>(v: Option<&'v Value<'a>>) -> &'v [Value<'a>] {
     }
 }
 
+/// The roster index of a human player's `prebattleId`, by client version
+/// (the old renderer's table; the keys are the field names sorted, and
+/// fields added over time shift it).
+fn prebattle_key(v: (u32, u32, u32)) -> i64 {
+    match v {
+        v if v >= (15, 10, 0) => 30,
+        v if v >= (0, 11, 11) => 29,
+        v if v >= (0, 10, 9) => 28,
+        v if v >= (0, 10, 7) => 27,
+        _ => 26,
+    }
+}
+
+/// An integer field of a roster entry, a list of `(key, value)` tuples.
+fn roster_int(entry: &pickle::Value, key: i64) -> Option<i64> {
+    use pickle::Value as P;
+    let P::List(fields) = entry else { return None };
+    fields.iter().find_map(|f| match f {
+        P::Tuple(kv) if matches!(kv.first(), Some(P::Int(k)) if *k == key) => match kv.get(1) {
+            Some(P::Int(v)) => Some(*v),
+            _ => None,
+        },
+        _ => None,
+    })
+}
+
 fn pickle_ints(v: &pickle::Value, out: &mut HashSet<i64>) {
     use pickle::Value as P;
     match v {
@@ -400,10 +437,13 @@ impl World {
                 ship_params_id: v.ship_id,
                 relation: v.relation,
                 meta_id: v.id,
+                division: 0,
                 roster: HashSet::new(),
             })
             .collect();
-        Self { players, ..Self::default() }
+        let clan_battle = meta.game_type.as_deref() == Some("ClanBattle");
+        let prebattle_key = meta.version().ok().map(|v| prebattle_key((v.major, v.minor, v.patch)));
+        Self { players, clan_battle, prebattle_key, ..Self::default() }
     }
 
     /// Uses GameParams for torpedo ranges.
@@ -430,6 +470,13 @@ impl World {
 
     /// The arena-info player of a Vehicle entity, whether or not its ship
     /// has been created (minimap-only ships are not).
+    /// Whether player `p` is in the recording player's division.
+    pub fn division_mate(&self, p: usize) -> bool {
+        let Some(me) = self.players.iter().position(|q| q.relation == 0) else { return false };
+        let d = self.players[me].division;
+        !self.clan_battle && p != me && d > 0 && self.players[p].division == d
+    }
+
     pub fn player_of(&self, id: u32) -> Option<usize> {
         self.ships
             .get(&id)
@@ -627,7 +674,13 @@ impl World {
             "receiveVehicleDeath" => {
                 if let (Some(victim), Some(killer)) = (int(0), int(1)) {
                     let (victim, killer) = (victim as u32, killer as u32);
-                    self.deaths.push(Death { clock, victim, killer, reason: int(2).unwrap_or(-1) });
+                    let position = self
+                        .ships
+                        .get(&victim)
+                        .filter(|s| s.in_aoi)
+                        .map(|s| [s.position.x, s.position.z])
+                        .or_else(|| self.minimap.get(&victim).map(|m| m.position));
+                    self.deaths.push(Death { clock, victim, killer, reason: int(2).unwrap_or(-1), position });
                     if let Some(s) = self.ships.get_mut(&victim) {
                         s.alive = false;
                     }
@@ -653,6 +706,9 @@ impl World {
                             .find(|p| ints.contains(&p.meta_id) && ints.contains(&p.ship_params_id))
                         {
                             p.roster = ints;
+                            if matches!(*name, "playersStates" | "playersData") {
+                                p.division = self.prebattle_key.and_then(|k| roster_int(entry, k)).unwrap_or(0);
+                            }
                         }
                     }
                 }
@@ -969,6 +1025,18 @@ impl World {
 #[cfg(test)]
 mod tests {
     use super::unpack_minimap;
+
+    #[test]
+    fn reads_the_division_from_the_roster() {
+        use crate::pickle::Value as P;
+        use std::rc::Rc;
+        let field = |k, v| P::Tuple(Rc::new(vec![P::Int(k), v]));
+        let entry = P::List(Rc::new(vec![field(29, P::Int(7)), field(30, P::Int(941459372)), field(31, P::None)]));
+        let key = super::prebattle_key((15, 10, 0));
+        assert_eq!(super::roster_int(&entry, key), Some(941459372));
+        assert_eq!(super::prebattle_key((15, 9, 0)), 29);
+        assert_eq!(super::roster_int(&entry, 31), None);
+    }
 
     #[test]
     fn unpacks_minimap_positions() {

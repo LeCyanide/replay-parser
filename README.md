@@ -140,11 +140,21 @@ the same output, built on this crate instead.
    `WEATHER_ZONE` (the toolkit's one ordered list fed by
    `state.weather.localWeather` changes and weather zone entities, which
    move by their position packets) match on every record of three replays
-   (Atoll and an Operation with both, Greece with a moving storm). A
-   random on Greece, new to the harness, shows what is left beyond the
-   five: division gold, a submarine's depth suffix (`(Scope)` against our
-   `(60m*)`), dead-ship positions up to ~7 px off, and some torpedo paths.
-   Not yet: division gold, interpolation between packets.
+   (Atoll and an Operation with both, Greece with a moving storm).
+   Division mates are gold (the roster's `prebattleId`, at a
+   version-specific index; not in clan battles) on ships, tracers,
+   torpedoes and camera lines, matching on every record. Wrecks stay where
+   the ship died (its position if in view, else its minimap sighting),
+   matching on every record of all seven replays. Two Greece differences
+   are the toolkit's: it reads depth states from the game's
+   `DEPTH_STATE` table, which on 15.10 stops at 3, so a submarine at
+   state 4 (deep) keeps its last label, `(Scope)`, where we show
+   `(60m*)`; and it multiplies each `receiveTorpedoDirection` speed factor
+   into the torpedo's current speed and ignores `receiveTorpedoManeuverEnd`
+   and `receiveTorpedoSynchronization`, so homing torpedoes crawl and then
+   stand still (ours land within a world unit of their server hit
+   position; this is also Atoll's torpedo difference).
+   Not yet: interpolation between packets.
 10. **Parity harness** — done, in the suite: `npm run diff-timeline -- old.wtreply
     new.wtreply`. Running it needs bakes from both sidecars (🖥).
 11. **Patch survey** ☁ — `replay-dump stats` (packet level) and
@@ -155,7 +165,7 @@ the same output, built on this crate instead.
     format knowledge.
 
 Next: the remaining tags in 9 one at a time, each checked with 10
-(division gold and the Greece differences next).
+(the ship name colour by loaded ammo and the disconnected flag next).
 
 ## Usage
 

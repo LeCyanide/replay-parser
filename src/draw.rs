@@ -21,6 +21,7 @@ use crate::world::World;
 pub const MINIMAP_SIZE: u32 = 768;
 
 pub const SELF_COLOR: [u8; 3] = [255, 255, 255];
+pub const DIVISION_COLOR: [u8; 3] = [255, 215, 0];
 pub const ALLY_COLOR: [u8; 3] = [76, 232, 170];
 pub const ENEMY_COLOR: [u8; 3] = [254, 77, 42];
 pub const NEUTRAL_COLOR: [u8; 3] = [255, 255, 255];
@@ -447,6 +448,11 @@ pub fn frame<'a>(
         })
     };
     let screen = |yaw: f32| std::f32::consts::FRAC_PI_2 - yaw;
+    // Division mates are gold, outside clan battles.
+    let ship_color = |id: u32, r: u32| match world.player_of(id) {
+        Some(p) if r != 0 && world.division_mate(p) => DIVISION_COLOR,
+        _ => relation_color(r),
+    };
 
     // Zones without a control point (arms-race buffs, …) are not caps.
     for c in world.caps.values().filter(|c| c.enabled && c.index >= 0) {
@@ -499,7 +505,12 @@ pub fn frame<'a>(
         let at = |f: f32| map.px(s.from[0] + (s.to[0] - s.from[0]) * f, s.from[2] + (s.to[2] - s.from[2]) * f);
         let frac = elapsed / duration;
         let head = at(frac);
-        out.push(Draw::ShotTracer { from: at((frac - len).max(0.0)), to: head, color: relation_color(r), secondary });
+        out.push(Draw::ShotTracer {
+            from: at((frac - len).max(0.0)),
+            to: head,
+            color: ship_color(s.owner, r),
+            secondary,
+        });
         if let Some(p) = shell {
             out.push(Draw::ShotTracerTip { at: head, color: ammo_color(&p.ammo_type), secondary });
         }
@@ -511,7 +522,7 @@ pub fn frame<'a>(
         // Unknown owners are skipped rather than coloured by a guess.
         let Some(r) = relation(t.owner) else { continue };
         if x.abs() <= half && z.abs() <= half {
-            out.push(Draw::Torpedo { pos: map.px(x, z), color: relation_color(r) });
+            out.push(Draw::Torpedo { pos: map.px(x, z), color: ship_color(t.owner, r) });
         }
     }
 
@@ -570,7 +581,7 @@ pub fn frame<'a>(
                 pos,
                 yaw,
                 species,
-                color: Some(relation_color(rel)),
+                color: Some(ship_color(id, rel)),
                 detected: true,
                 opacity: 1.0,
                 is_self: rel == 0,
@@ -623,18 +634,15 @@ pub fn frame<'a>(
             entity_id: id,
             pos: if s.in_aoi { map.px(s.position.x, s.position.z) } else { map.px(m.position[0], m.position[1]) },
             yaw: screen(aim),
-            color: relation_color(relation(id).unwrap_or(2)),
+            color: ship_color(id, relation(id).unwrap_or(2)),
             length: CAMERA_LINE,
         });
     }
 
     for d in &world.deaths {
         let (ship, sighting) = (world.ships.get(&d.victim), world.minimap.get(&d.victim));
-        let pos = match (ship, sighting) {
-            (Some(s), _) => map.px(s.position.x, s.position.z),
-            (None, Some(m)) => map.px(m.position[0], m.position[1]),
-            (None, None) => continue,
-        };
+        let Some([x, z]) = d.position else { continue };
+        let pos = map.px(x, z);
         let l = label(d.victim);
         out.push(Draw::DeadShip {
             entity_id: d.victim,
