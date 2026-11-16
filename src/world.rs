@@ -113,6 +113,31 @@ pub struct Squadron {
     pub seen: f32,
 }
 
+/// A ship's position as the minimap shows it, from `updateMinimapVisionInfo`.
+/// Ships outside the area of interest can be here: spotted, but minimap only.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct Sighting {
+    /// World x, z, quantized to 5000 / 2047 ≈ 2.44 units.
+    pub position: [f32; 2],
+    /// Quantized to 2π / 256.
+    pub yaw: f32,
+    pub at: f32,
+}
+
+/// Unpacks `MINIMAP_USER_INFO.packedData`: bits 0–10 x, 11–21 z (each
+/// 0..2047 over −2500..2500 world units, whatever the map size), 22–29 yaw
+/// (0..255 over −π..π); bit 31 set means no position (x and z then 0).
+/// Bit 30 was never seen set. Checked against `Position` packets in
+/// `tests/world.rs`.
+pub fn unpack_minimap(packed: u32) -> Option<([f32; 2], f32)> {
+    if packed >> 31 != 0 {
+        return None;
+    }
+    let coord = |v: u32| (v as f32 / 2047.0 - 0.5) * 5000.0;
+    let yaw = ((packed >> 22) & 0xff) as f32 / 256.0 * std::f32::consts::TAU - std::f32::consts::PI;
+    Some(([coord(packed & 0x7ff), coord((packed >> 11) & 0x7ff)], yaw))
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct Torpedo {
     pub owner: u32,
@@ -157,6 +182,9 @@ pub struct World {
     pub caps: BTreeMap<u32, CapturePoint>,
     pub smokes: BTreeMap<u32, Smoke>,
     pub squadrons: BTreeMap<u64, Squadron>,
+    /// By Vehicle entity id, which may not be in `ships` yet. Removed when an
+    /// update says the position is gone.
+    pub minimap: BTreeMap<u32, Sighting>,
     pub torpedoes: Vec<Torpedo>,
     pub shells: Vec<Shell>,
     pub deaths: Vec<Death>,
@@ -339,6 +367,23 @@ impl World {
                 let ids: Vec<u32> = self.ships.keys().copied().collect();
                 ids.into_iter().for_each(|id| self.link(id));
             }
+            // The second list was empty on every fixture; meaning unknown.
+            "updateMinimapVisionInfo" => {
+                for item in list(arg(0)) {
+                    let (Some(id), Some(packed)) = (i64_of(item.get("vehicleID")), i64_of(item.get("packedData")))
+                    else {
+                        continue;
+                    };
+                    match unpack_minimap(packed as u32) {
+                        Some((position, yaw)) => {
+                            self.minimap.insert(id as u32, Sighting { position, yaw, at: clock });
+                        }
+                        None => {
+                            self.minimap.remove(&(id as u32));
+                        }
+                    }
+                }
+            }
             "receive_addMinimapSquadron" => {
                 let (Some(id), Some(Value::Vector2(p))) = (int(0), arg(3)) else { return };
                 let id = id as u64;
@@ -506,5 +551,20 @@ impl World {
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::unpack_minimap;
+
+    #[test]
+    fn unpacks_minimap_positions() {
+        // From the Gold Harbor fixture; the Position packet at the same
+        // clock put this ship at (-473.1, 304.8), yaw 2.36.
+        let ([x, z], yaw) = unpack_minimap(937681726).unwrap();
+        assert!((x - -473.1).abs() < 2.5 && (z - 304.8).abs() < 2.5, "{x} {z}");
+        assert!((yaw - 2.36).abs() < 0.03, "{yaw}");
+        assert_eq!(unpack_minimap(1 << 31), None);
     }
 }

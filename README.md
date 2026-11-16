@@ -60,10 +60,12 @@ the same output, built on this crate instead.
    and battle stage; minimap squadrons (the plane id's low 32 bits are the
    owning ship); torpedoes, dead-reckoned between course changes and syncs;
    shells in flight from muzzle to aim point, landing at
-   `0.36 × serverTimeLeft` (measured; see Tests).
-   Not yet: interpolation, decoding `visibilityFlags` and the packed
-   `updateMinimapVisionInfo` positions (minimap-only spotting), secondary
-   shells, buildings, weather, consumables. Torpedoes that never get a kill
+   `0.36 × serverTimeLeft` (measured; see Tests); minimap sightings from
+   `updateMinimapVisionInfo`, including ships spotted outside the area of
+   interest (minimap only). Its `packedData` is x and z in 11 bits each over
+   a fixed −2500..2500, yaw in 8 bits, and bit 31 for "no position".
+   Not yet: interpolation, decoding `visibilityFlags`, secondary shells,
+   buildings, weather, consumables. Torpedoes that never get a kill
    message are dropped at 150 s until GameParams gives their range.
 9. **Draw-command emitter** 🖥 — world state → the existing `format.rs` record
    tags (`SHIP`, `HEALTH_BAR`, `SHOT_TRACER`, `TORPEDO`, `SMOKE`, `PLANE`,
@@ -137,7 +139,11 @@ result, a cap moved, and most squadron owners are ships of the battle.
 Torpedo dead reckoning is compared with every `receiveTorpedoSynchronization`
 (median drift under 1 unit, worst under 10). Shells that hit at their aim
 point (about 3,400 across the fixtures) land at 0.95–1.05 of the predicted
-flight time, median per replay.
+flight time, median per replay. Every minimap sighting of a ship whose
+real position arrived within 0.3 s matches it within 2.5 units (one
+quantization step); headings match to a median under 0.02 rad over more
+than 10,000 sightings, and over 100 sightings are of ships outside the
+area of interest.
 
 The pickle reader is checked against CPython on `tests/pickle_corpus.json`
 (regenerate with `python3 -I scripts/gen-pickle-corpus.py`).

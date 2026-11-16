@@ -37,6 +37,7 @@ fn world_is_consistent_on_every_fixture() {
     assert!(!files.is_empty(), "run scripts/fetch-fixtures.sh");
 
     let (mut total_squadrons, mut total_torpedoes, mut total_aimed_hits) = (0usize, 0usize, 0usize);
+    let (mut yaw_errors, mut minimap_only) = (Vec::new(), 0usize);
     for path in files {
         let name = path.file_name().unwrap().to_string_lossy().into_owned();
         let replay = Replay::from_file(&path).unwrap();
@@ -94,6 +95,25 @@ fn world_is_consistent_on_every_fixture() {
                 }
             }
             world.apply(&dec, &p, event.as_ref());
+
+            // Fresh minimap sightings of ships whose real position is also
+            // fresh agree with it to the quantization step; heading also
+            // drifts with turn rate over the gap, so it is checked in bulk.
+            if matches!(&event, Some(Event::Method { method: "updateMinimapVisionInfo", .. })) {
+                for (id, m) in world.minimap.iter().filter(|(_, m)| m.at == world.clock) {
+                    match world.ships.get(id) {
+                        Some(s) if s.in_aoi && world.clock - s.seen < 0.3 => {
+                            let d = (m.position[0] - s.position.x).hypot(m.position[1] - s.position.z);
+                            let turn = (m.yaw - s.yaw).rem_euclid(std::f32::consts::TAU);
+                            let dyaw = turn.min(std::f32::consts::TAU - turn);
+                            assert!(d < 2.5 && dyaw < 0.2, "{name} @ {}: sighting {m:?} vs ship {s:?}", world.clock);
+                            yaw_errors.push(dyaw);
+                        }
+                        Some(s) if s.in_aoi => {}
+                        _ => minimap_only += 1,
+                    }
+                }
+            }
 
             for s in world.ships.values() {
                 let pos = s.position;
@@ -179,4 +199,9 @@ fn world_is_consistent_on_every_fixture() {
     // Not every battle has carriers or torpedo boats, but the corpus does.
     assert!(total_squadrons > 0 && total_torpedoes > 0, "no squadrons or torpedoes in any fixture");
     assert!(total_aimed_hits > 500, "only {total_aimed_hits} aimed shell hits checked");
+    assert!(yaw_errors.len() > 10_000, "only {} minimap sightings checked", yaw_errors.len());
+    // Half a 2π/256 step from rounding, plus turning between messages.
+    let m = median(yaw_errors);
+    assert!(m < 0.02, "minimap yaw off by {m} rad (median)");
+    assert!(minimap_only > 100, "only {minimap_only} minimap-only sightings");
 }
