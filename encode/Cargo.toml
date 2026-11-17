@@ -1,0 +1,16 @@
+[package]
+name = "wows-replay-encode"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+description = "RGBA frames to H.264 MP4 (OpenH264 built from source, hand-written muxer)"
+publish = false
+
+[lib]
+name = "replay_encode"
+
+[dependencies]
+# Raw bindings + Cisco OpenH264 sources compiled by its build script (cc, plus
+# nasm for the x86 SIMD kernels when nasm is on PATH). Only the encoder entry
+# points are referenced, so the decoder objects are not linked in.
+openh264-sys2 = { version = "=0.9.10", default-features = false, features = ["source"] }

@@ -1,0 +1,32 @@
+[workspace]
+members = [".", "encode", "render"]
+
+[package]
+name = "wows-replay-parser"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-only"
+description = "World of Warships replay parser: container, packets, entities, battle simulation and draw commands"
+publish = false
+
+[lib]
+name = "replay_parser"
+
+[[bin]]
+name = "replay-dump"
+path = "src/bin/replay-dump.rs"
+
+[dependencies]
+blowfish = "0.9"
+flate2 = "1"
+roxmltree = "0.20"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[profile.release]
+opt-level = 3
+
+# OpenH264 is unusably slow at opt-level 0; keep debug builds and tests fast.
+[profile.dev.package."*"]
+opt-level = 3

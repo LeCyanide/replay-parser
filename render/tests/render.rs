@@ -1,0 +1,193 @@
+//! Renders the fixture replays (see the root README for fetching them and
+//! their entity definitions). Fails without them, as the parser's tests do.
+
+use std::path::Path;
+use std::path::PathBuf;
+
+use replay_render::DataDir;
+use replay_render::RenderOptions;
+use replay_render::tiny_skia::Pixmap;
+
+fn root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf()
+}
+
+/// A data dir over the fixture defs; `extra` adds GameParams packs.
+fn data_dir(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("wows-render-test-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("gameparams")).unwrap();
+    let scripts = root().join("tests/fixtures/scripts");
+    assert!(scripts.is_dir(), "run scripts/fetch-entity-defs.sh first");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&scripts, dir.join("defs")).unwrap();
+    dir
+}
+
+fn fixture(part: &str) -> Vec<u8> {
+    let dir = root().join("tests/fixtures/replays");
+    let f = std::fs::read_dir(&dir)
+        .expect("run scripts/fetch-fixtures.sh first")
+        .filter_map(|e| Some(e.ok()?.path()))
+        .find(|p| p.to_string_lossy().contains(part))
+        .unwrap_or_else(|| panic!("no fixture matching {part}"));
+    std::fs::read(f).unwrap()
+}
+
+fn small() -> RenderOptions {
+    RenderOptions { width: 600, height: 360, fps: 4, duration: Some(5.0), ..RenderOptions::default() }
+}
+
+#[test]
+fn renders_every_fixture() {
+    let data = DataDir::new(data_dir("all"));
+    let dir = root().join("tests/fixtures/replays");
+    let mut n = 0;
+    for f in std::fs::read_dir(&dir).expect("run scripts/fetch-fixtures.sh first") {
+        let path = f.unwrap().path();
+        let bytes = std::fs::read(&path).unwrap();
+        let mut frames = Vec::new();
+        let summary = replay_render::scene::render(&bytes, &data, &small(), &mut |_| {}, &mut |pm: &Pixmap| {
+            frames.push(pm.clone());
+            Ok(())
+        })
+        .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        assert_eq!(summary.frames, 20, "{}", path.display());
+        assert_eq!(frames.len(), 20);
+        // The battle is sped up to fit, and the first frame is in battle.
+        assert!(summary.battle_seconds > 300.0, "{}: {}", path.display(), summary.battle_seconds);
+        assert!(summary.speed > 10.0);
+        // Frames change over the battle, and the sidebar is painted.
+        assert_ne!(frames[1].data(), frames[15].data(), "{}", path.display());
+        let side = frames[10].pixel(500, 300).unwrap();
+        assert!(side.red() < 40 && side.blue() < 60, "{}: sidebar background", path.display());
+        n += 1;
+    }
+    assert_eq!(n, 7);
+}
+
+#[test]
+fn game_data_names_ships() {
+    // A hand-made extract in `replay-dump datapack`'s format.
+    let dir = data_dir("gp");
+    let bytes = fixture("Valparaiso");
+    let replay = replay_parser::Replay::from_bytes(&bytes).unwrap();
+    let species = ["Destroyer", "Cruiser", "Battleship", "AirCarrier", "Submarine"];
+    let mut ships = serde_json::Map::new();
+    let mut names = serde_json::Map::new();
+    for (i, v) in replay.meta.vehicles.iter().enumerate() {
+        let index = format!("PXSX{i:03}");
+        ships.insert(
+            v.ship_id.to_string(),
+            serde_json::json!({
+                "id": v.ship_id, "index": index, "name": format!("{index}_Test"), "species": species[i % 5],
+                "nation": "x", "level": 10, "consumables": [], "secondary_ammo": []
+            }),
+        );
+        names.insert(format!("IDS_{index}"), format!("Ship {i}").into());
+    }
+    let pack = serde_json::json!({
+        "build": 0,
+        "gameparams": { "ships": ships, "projectiles": {}, "aircraft": {}, "buildings": {}, "drops": {} },
+        "names": names,
+    });
+    let v = replay.meta.version().unwrap();
+    std::fs::write(dir.join(format!("gameparams/{}_{}_{}.json", v.major, v.minor, v.patch)), pack.to_string()).unwrap();
+    let data = DataDir::new(&dir);
+    let gd = data.game_data(&v).unwrap().expect("pack found by version");
+    let unique: std::collections::HashSet<i64> = replay.meta.vehicles.iter().map(|v| v.ship_id).collect();
+    assert_eq!(gd.gameparams.ships.len(), unique.len());
+    let summary = replay_render::scene::render(&bytes, &data, &small(), &mut |_| {}, &mut |_: &Pixmap| Ok(())).unwrap();
+    assert!(summary.warnings.iter().all(|w| !w.contains("GameParams")), "{:?}", summary.warnings);
+}
+
+#[test]
+fn unknown_version_is_reported() {
+    let dir = std::env::temp_dir().join(format!("wows-render-empty-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let err = replay_render::scene::render(
+        &fixture("Faroe"),
+        &DataDir::new(&dir),
+        &small(),
+        &mut |_| {},
+        &mut |_: &Pixmap| Ok(()),
+    )
+    .err()
+    .expect("no defs");
+    assert_eq!(err.code(), "unsupported_version");
+}
+
+#[test]
+fn rejects_odd_sizes() {
+    let o = RenderOptions { width: 1081, ..RenderOptions::default() };
+    assert!(o.validate().is_err());
+    assert!(RenderOptions::default().validate().is_ok());
+}
+
+#[test]
+fn renders_an_mp4() {
+    let data = DataDir::new(data_dir("mp4"));
+    let opts = RenderOptions { width: 720, height: 480, fps: 10, duration: Some(4.0), ..RenderOptions::default() };
+    let mut stages = Vec::new();
+    let (mp4, summary) =
+        replay_render::render_mp4(&fixture("Utrecht"), &data, &opts, &mut |p| stages.push(p.stage)).unwrap();
+    assert_eq!(summary.frames, 40);
+    // ftyp first, then moov before mdat (streams from the start).
+    assert_eq!(&mp4[4..8], b"ftyp");
+    let moov = mp4.windows(4).position(|w| w == b"moov").unwrap();
+    let mdat = mp4.windows(4).position(|w| w == b"mdat").unwrap();
+    assert!(moov < mdat);
+    use replay_render::Stage::*;
+    for s in [Parse, Simulate, Render, Encode] {
+        assert!(stages.contains(&s), "{s:?} reported");
+    }
+}
+
+#[test]
+fn speed_sets_the_length() {
+    // At ×32 the video lasts the battle / 32, plus the 1.5 s hold.
+    let data = DataDir::new(data_dir("speed"));
+    let opts = RenderOptions { width: 600, height: 360, fps: 4, speed: 32.0, ..RenderOptions::default() };
+    let mut plan = None;
+    struct Sink<'a>(&'a mut Option<replay_render::scene::Plan>);
+    impl replay_render::scene::FrameSink for Sink<'_> {
+        fn begin(&mut self, p: &replay_render::scene::Plan) -> Result<(), replay_render::RenderError> {
+            *self.0 = Some(*p);
+            Ok(())
+        }
+        fn frame(&mut self, _: &Pixmap) -> Result<(), replay_render::RenderError> {
+            Ok(())
+        }
+    }
+    let summary =
+        replay_render::scene::render(&fixture("Utrecht"), &data, &opts, &mut |_| {}, &mut Sink(&mut plan)).unwrap();
+    let plan = plan.expect("begin called");
+    assert_eq!(plan.frames, summary.frames);
+    assert!((summary.speed - 32.0).abs() < 0.5, "{}", summary.speed);
+    let expect = summary.battle_seconds / 32.0 + 1.5;
+    assert!((plan.seconds - expect).abs() < 0.5, "{} vs {expect}", plan.seconds);
+}
+
+#[test]
+fn stays_under_the_size_limit() {
+    let data = DataDir::new(data_dir("size"));
+    let max = 600_000;
+    let opts = RenderOptions { width: 720, height: 480, fps: 15, max_bytes: max, ..RenderOptions::default() };
+    let (mp4, _) = replay_render::render_mp4(&fixture("Utrecht"), &data, &opts, &mut |_| {}).unwrap();
+    assert!(mp4.len() as u64 <= max, "{} > {max}", mp4.len());
+    // An impossible limit is an error, not an oversized file.
+    let tiny = RenderOptions { max_bytes: 200_000, ..opts };
+    let err = replay_render::render_mp4(&fixture("Utrecht"), &data, &tiny, &mut |_| {}).err().expect("too small");
+    assert_eq!(err.code(), "too_large");
+}
+
+#[test]
+fn output_is_deterministic() {
+    // Same replay, same options: the same bytes (so renders can be cached
+    // and compared).
+    let data = DataDir::new(data_dir("det"));
+    let opts = RenderOptions { width: 720, height: 480, fps: 10, ..RenderOptions::default() };
+    let a = replay_render::render_mp4(&fixture("Valparaiso"), &data, &opts, &mut |_| {}).unwrap().0;
+    let b = replay_render::render_mp4(&fixture("Valparaiso"), &data, &opts, &mut |_| {}).unwrap().0;
+    assert!(a == b, "two renders differ");
+}

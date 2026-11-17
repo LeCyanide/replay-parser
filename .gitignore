@@ -1,0 +1,6 @@
+/target
+/tests/fixtures/replays/
+/tests/fixtures/scripts/
+# Local replays for manual checks (other players' battles; not committed)
+/tests/fixtures/local/
+/.claude/
