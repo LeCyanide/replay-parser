@@ -63,7 +63,7 @@ pub fn death_reasons_from_xml(xml: &str) -> Option<Vec<String>> {
 
 /// A death reason's constant name: from `table` (a build's own) if given,
 /// else the default.
-pub fn death_reason<'a>(code: i64, table: Option<&'a [String]>) -> Option<&'a str> {
+pub fn death_reason(code: i64, table: Option<&[String]>) -> Option<&str> {
     let i = usize::try_from(code).ok()?;
     match table {
         Some(t) => t.get(i).map(String::as_str).filter(|s| !s.is_empty()),

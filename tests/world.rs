@@ -344,5 +344,6 @@ fn death_reasons_match_the_hits_before_them() {
             }
         }
     }
+    eprintln!("checked {torpedo_deaths} torpedo and {shell_deaths} shell deaths");
     assert!(torpedo_deaths >= 20 && shell_deaths >= 60, "{torpedo_deaths} torpedo, {shell_deaths} shell deaths");
 }
