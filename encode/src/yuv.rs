@@ -43,7 +43,7 @@ const C_OFF: i32 = (128 << C_SHIFT) + (1 << (C_SHIFT - 1));
 /// Luma for one row. Kept as a separate simple loop so LLVM vectorizes it.
 #[inline(always)]
 fn luma_row(src: &[u8], dst: &mut [u8]) {
-    for (px, y) in src.chunks_exact(4).zip(dst) {
+    for (px, y) in src.as_chunks::<4>().0.iter().zip(dst) {
         let (r, g, b) = (px[0] as i32, px[1] as i32, px[2] as i32);
         *y = ((Y_R * r + Y_G * g + Y_B * b + Y_OFF) >> SHIFT) as u8;
     }
@@ -52,7 +52,7 @@ fn luma_row(src: &[u8], dst: &mut [u8]) {
 /// Chroma for one pair of rows from the 2x2 RGB sums.
 #[inline(always)]
 fn chroma_row(src0: &[u8], src1: &[u8], dst_u: &mut [u8], dst_v: &mut [u8]) {
-    let blocks = src0.chunks_exact(8).zip(src1.chunks_exact(8));
+    let blocks = src0.as_chunks::<8>().0.iter().zip(src1.as_chunks::<8>().0);
     for ((a, b), (u, v)) in blocks.zip(dst_u.iter_mut().zip(dst_v)) {
         let sum = |c: usize| a[c] as i32 + a[c + 4] as i32 + b[c] as i32 + b[c + 4] as i32;
         let (r, g, bl) = (sum(0), sum(1), sum(2));

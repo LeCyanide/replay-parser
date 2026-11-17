@@ -140,7 +140,9 @@ impl Read for Decryptor<'_> {
             return Ok(0);
         }
         let n = blocks * BLOCK;
-        for (src, dst) in self.encrypted[..n].chunks_exact(BLOCK).zip(buf[..n].chunks_exact_mut(BLOCK)) {
+        let (src_blocks, _) = self.encrypted[..n].as_chunks::<BLOCK>();
+        let (dst_blocks, _) = buf[..n].as_chunks_mut::<BLOCK>();
+        for (src, dst) in src_blocks.iter().zip(dst_blocks.iter_mut()) {
             let block = GenericArray::from_mut_slice(dst);
             block.copy_from_slice(src);
             self.cipher.decrypt_block(block);
