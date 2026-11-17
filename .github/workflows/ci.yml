@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: System packages
+        # nasm: the encoder's SIMD kernels; ffmpeg: the encoder tests decode their output.
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends nasm ffmpeg
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Test data cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            tests/fixtures/replays
+            tests/fixtures/scripts
+          key: fixtures-${{ hashFiles('scripts/fetch-fixtures.sh', 'scripts/fetch-entity-defs.sh') }}
+      - name: Fetch test replays and entity definitions
+        run: |
+          ./scripts/fetch-fixtures.sh
+          ./scripts/fetch-entity-defs.sh
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --release --workspace
+
+  node:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bindings/node
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: bindings/node/package-lock.json
+      - run: npm ci
+      - run: npm test
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t wows-render .
+      - name: Smoke test (renders a fixture on a plain grid)
+        run: |
+          ./scripts/fetch-fixtures.sh
+          ./scripts/fetch-entity-defs.sh
+          mkdir -p data out && chmod 777 out
+          cp -r tests/fixtures/scripts data/defs
+          replay=$(ls tests/fixtures/replays/*Faroe*.wowsreplay)
+          docker run --rm -v "$PWD/data:/data:ro" -v "$PWD/$replay:/in.wowsreplay:ro" -v "$PWD/out:/out" \
+            wows-render /in.wowsreplay --out /out/test.mp4 --data /data --max-mb 8
+          test -s out/test.mp4
+          ls -la out/test.mp4

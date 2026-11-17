@@ -50,6 +50,16 @@ events).
   pickle. The renderer loads it as JSON.
 - **Parser**: `World::win_score` (`teamWinScore`); GameParams types are
   deserializable; one clippy fix; 15.9 entity defs added to the fixture fetch.
+- **Packaging**: `Dockerfile` (Rust build stage → Debian slim with the
+  stripped binary), `scripts/build-data.sh` (data directory from a game
+  install plus the suite's map seeds), `docs/DEPLOY.md`. Tested here: the
+  build stage's commands in the Rust image, and the runtime image rendering
+  a fixture (valid 27 s MP4); the literal `docker build` could not run here
+  (no network inside containers), CI runs it.
+- **CI** (`.github/workflows/ci.yml`): format, clippy `-D warnings`, all
+  tests with fetched fixtures and ffmpeg, the Node wrapper's tests, and a
+  Docker build with a smoke render. Its steps pass locally; it has not run
+  on GitHub yet.
 - **Tests**: `render/tests/render.rs` renders all 7 fixtures (frame count,
   battle span, frames change, sidebar painted), loads a data pack, and checks
   the unsupported-version error, and encodes a short MP4. Workspace: 43 Rust
@@ -74,10 +84,9 @@ events).
 
 ## Open tasks (not started or partial)
 
-- **Deployment of the bot**: build `wows-render` for the bot host's
-  platform, keep a data directory per supported game version, and refresh it
-  on every game patch (datapack + suite map seeds). A CI job or script for
-  this does not exist yet.
+- **Data refresh per patch**: `scripts/build-data.sh` must be run on a
+  machine with the game after each patch; it is untested against a real
+  install (as is `datapack`).
 - **Patch cadence**: each game patch needs a new datapack before the bot can
   render its replays. Consider falling back to the nearest older definitions
   only if decode failures stay near zero (not implemented: today it refuses).

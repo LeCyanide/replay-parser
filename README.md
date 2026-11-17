@@ -17,7 +17,8 @@ simulates the battle, and renders it. Its users:
 | `wows-replay-encode` | `encode/` | RGBA frames to H.264 MP4 (OpenH264 from source, no ffmpeg) |
 | `@tactics/wows-render` | `bindings/node/` | TypeScript wrapper that runs `wows-render` for the bot |
 
-Open tasks and notes from the current round are in [`docs/STATUS.md`](docs/STATUS.md).
+Open tasks and notes: [`docs/STATUS.md`](docs/STATUS.md). Deploying for the
+bot: [`docs/DEPLOY.md`](docs/DEPLOY.md).
 
 ## Rendering a replay
 

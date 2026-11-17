@@ -1,0 +1,6 @@
+target/
+.claude/
+.git/
+tests/fixtures/
+bindings/node/node_modules/
+bindings/node/dist/
