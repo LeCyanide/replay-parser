@@ -46,9 +46,9 @@ fn flag(pm: &mut Pixmap, x: f32, y: f32, px: f32, paint: &Paint) {
 const TITLES: &[(&str, &str)] = &[("Almirante", "Almte."), ("Admiral", "Adm.")];
 
 /// A word of a name that can be shortened or kept as its identifying part:
-/// capitalised, not all capitals (II, CLR, HSF), not the "Golden" variant tag.
+/// capitalised, not all capitals (II, CLR, HSF, the B / G variant tags).
 fn proper(w: &str) -> bool {
-    w.chars().next().is_some_and(char::is_uppercase) && w.chars().any(char::is_lowercase) && w != "Golden"
+    w.chars().next().is_some_and(char::is_uppercase) && w.chars().any(char::is_lowercase)
 }
 
 /// "Almirante" → "Almte.", "Marcantonio" → "M."; None for words that stay.
@@ -191,10 +191,19 @@ impl Text {
     /// until it fits ("Marcantonio Colonna" → "M. Colonna", "Almirante
     /// Cochrane" → "Almte. Cochrane", "Alberico da Barbiano" → "A. da
     /// Barbiano"). The last proper word and anything after it ("'44",
-    /// "Golden") stay, as do particles and capitals ("da", "II", "HSF").
+    /// "B") stay, as do particles and capitals ("da", "II", "HSF"). The Black
+    /// and Golden variants are always "B" and "G", as in the game.
     /// Cut with an ellipsis only if that is still too long.
     pub fn fit_name(&self, s: &str, px: f32, w: Weight, max: f32) -> String {
         let mut words: Vec<String> = s.split(' ').map(str::to_owned).collect();
+        let n = words.len();
+        if let Some(last) = words.last_mut().filter(|_| n > 1) {
+            match last.as_str() {
+                "Black" => *last = "B".to_owned(),
+                "Golden" => *last = "G".to_owned(),
+                _ => {}
+            }
+        }
         let keep = words.iter().rposition(|w| proper(w)).unwrap_or(words.len());
         for i in 0..keep {
             if self.width(&words.join(" "), px, w) <= max {
@@ -339,7 +348,8 @@ mod tests {
             ("Almirante Cochrane", "Almte. Cochrane"),
             ("Alberico da Barbiano", "A. da Barbiano"),
             ("West Virginia '44", "W. Virginia '44"),
-            ("Prins van Oranje Golden", "P. van Oranje Golden"),
+            ("Prins van Oranje Golden", "P. van Oranje G"),
+            ("Massachusetts Black", "Massachusetts B"),
             ("Admiral Graf Spee", "Adm. G. Spee"),
             ("St. Vincent", "St. Vincent"),
         ] {
@@ -347,6 +357,7 @@ mod tests {
         }
         // Nothing to shorten when it fits; one word at a time otherwise.
         assert_eq!(t.fit_name("Marcantonio Colonna", px, w, 1000.0), "Marcantonio Colonna");
+        assert_eq!(t.fit_name("Hindenburg Golden", px, w, 1000.0), "Hindenburg G");
         assert_eq!(t.fit_name("Admiral Graf Spee", px, w, fits("Adm. Graf Spee")), "Adm. Graf Spee");
     }
 

@@ -354,9 +354,9 @@ impl MapLayer {
             Some(false) => ("Defeat", ENEMY),
             None => ("Draw", LABEL),
         };
-        // Near the bottom, so the end state of the battle stays visible.
+        // Near the top, so the end state of the battle stays visible.
         let h = s * 0.15;
-        let y0 = s * 0.94 - h;
+        let y0 = s * 0.06;
         rect(pm, 0.0, y0, s, h, [0x0d, 0x11, 0x17], 0.82);
         rect(pm, 0.0, y0, s, 2.0, color, 0.9);
         rect(pm, 0.0, y0 + h - 2.0, s, 2.0, color, 0.9);

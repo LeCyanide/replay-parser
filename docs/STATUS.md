@@ -95,7 +95,8 @@ events).
 - Sidebar: event times on the countdown clock, caps in label order.
 - Long ship names shortened as the game does when they don't fit
   ("M. Colonna", "Almte. Cochrane"); short mode names in the subtitle; the
-  result banner slimmer and near the bottom of the map.
+  result banner slimmer and near the top of the map; Black and Golden
+  variants as "B" and "G".
 
 ## Blocked here, needs a game install (🖥)
 
