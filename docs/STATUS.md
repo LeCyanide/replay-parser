@@ -23,9 +23,17 @@ events).
 - **Timing**: the pre-battle countdown is skipped; the battle up to a few
   seconds after the result is sampled evenly into the video (×15–×37 on the
   fixtures for 30 s); the final frame is held for 1.5 s.
-- **Video**: H.264 MP4, built into the binary (no ffmpeg at runtime). *In
-  progress*: `render/src/encode.rs` is a placeholder until one of two
-  independently built encoders is chosen; `--frames` (PNG stills) works.
+- **Video** (`encode/`, crate `wows-replay-encode`): H.264 Main profile,
+  yuv420p BT.709, MP4 with `moov` first, no ffmpeg at runtime (Cisco
+  OpenH264 built from source + a hand-written muxer). Measured on the
+  fixtures at 1080×720, 30 fps, 30 s: 3.2–3.5 MB, 15–18 s per replay in
+  total (about 7–8 s of it encoding), decodes with zero ffmpeg errors.
+- **Encoder choice** (built twice, independently): both used OpenH264 and a
+  hand-written muxer; on the same 900 real frames of two replays, version A
+  (own GOP-level rate control, screen-content mode) scored +1.4 dB PSNR over
+  version B (OpenH264's rate control) at equal or lower size; B needed ~50%
+  more bytes for similar quality but encoded 2.2× faster (3.5 s vs 7–8 s). A
+  was kept: file size against Discord's upload limit matters more than ~5 s.
 - **CLI** `wows-render` with JSON progress/error lines; error codes
   `unsupported_version`, `bad_replay`, `missing_data`, `io`, `internal`.
 - **Node wrapper** `bindings/node` (`@tactics/wows-render`): `renderReplay`,
@@ -38,7 +46,8 @@ events).
   deserializable; one clippy fix; 15.9 entity defs added to the fixture fetch.
 - **Tests**: `render/tests/render.rs` renders all 7 fixtures (frame count,
   battle span, frames change, sidebar painted), loads a data pack, and checks
-  the unsupported-version error. Workspace: 34 Rust tests pass, clippy clean.
+  the unsupported-version error, and encodes a short MP4. Workspace: 41 Rust
+  tests pass (including the encoder's ffprobe/ffmpeg checks), clippy clean.
 
 ## Blocked here, needs a game install (🖥)
 
@@ -47,7 +56,8 @@ events).
    do not fit 15.10: on the supplied Wichita replay (15.10.0, build 13533378)
    23,128 of 72,447 entity packets fail (new Avatar and Vehicle methods and
    properties shift the indices). `wows-render` therefore refuses it with
-   `unsupported_version`. Fix: on a machine with the game,
+   `unsupported_version`. The Cleveland replay supplied as 15.9 is also
+   15.10.0, build 13533378, by its own metadata (12,678 of 46,871 fail). Fix: on a machine with the game,
    `replay-dump datapack <game dir> <data dir> 13533378 15_10_0`, then render
    the Wichita replay and check it.
 2. **GameParams extract.** Same command; without it ships show player names
@@ -81,6 +91,15 @@ events).
 - **Node addon**: the wrapper spawns the CLI (simple, isolates crashes). An
   in-process napi-rs addon would save process start-up only; not needed now.
 - **Legacy versions**: pre-12.6 replays are still unverified (no fixture).
+
+- **Encoder build/runtime**: OpenH264 is C++, so the binary links
+  `libstdc++.so.6` dynamically (present on Debian/Ubuntu images, not on
+  distroless/musl); build with `nasm` installed, or encoding is ~2× slower
+  (the build does not warn). Cisco's H.264 patent coverage applies to its
+  prebuilt binaries only, not to builds from source; check this before any
+  public distribution.
+- **Encode speed**: encoding runs after each frame on one thread; running it
+  on a second thread would overlap rendering and encoding (~40% faster).
 
 ## Notes
 

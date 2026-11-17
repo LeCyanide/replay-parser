@@ -117,3 +117,22 @@ fn rejects_odd_sizes() {
     assert!(o.validate().is_err());
     assert!(RenderOptions::default().validate().is_ok());
 }
+
+#[test]
+fn renders_an_mp4() {
+    let data = DataDir::new(data_dir("mp4"));
+    let opts = RenderOptions { width: 720, height: 480, fps: 10, duration: 4.0, hold_end: true };
+    let mut stages = Vec::new();
+    let (mp4, summary) =
+        replay_render::render_mp4(&fixture("Utrecht"), &data, &opts, &mut |p| stages.push(p.stage)).unwrap();
+    assert_eq!(summary.frames, 40);
+    // ftyp first, then moov before mdat (streams from the start).
+    assert_eq!(&mp4[4..8], b"ftyp");
+    let moov = mp4.windows(4).position(|w| w == b"moov").unwrap();
+    let mdat = mp4.windows(4).position(|w| w == b"mdat").unwrap();
+    assert!(moov < mdat);
+    use replay_render::Stage::*;
+    for s in [Parse, Simulate, Render, Encode] {
+        assert!(stages.contains(&s), "{s:?} reported");
+    }
+}

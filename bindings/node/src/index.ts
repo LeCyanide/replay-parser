@@ -395,9 +395,22 @@ export async function supportedVersions(dataDir: string): Promise<string[]> {
     });
   }
   const key = (v: string): number[] => v.split("_").map((n) => Number.parseInt(n, 10) || 0);
-  return entries
-    .filter((d) => d.isDirectory() && /^\d+(_\d+)*$/.test(d.name))
-    .map((d) => d.name)
+  const root = `${dataDir.replace(/[\\/]+$/, "")}/defs`;
+  // As the renderer decides: a version directory (or a symlink to one) that
+  // holds entities.xml.
+  const usable = await Promise.all(
+    entries
+      .filter((d) => /^\d+(_\d+)*$/.test(d.name))
+      .map(async (d) => {
+        try {
+          return (await stat(`${root}/${d.name}/entities.xml`)).isFile() ? d.name : null;
+        } catch {
+          return null;
+        }
+      }),
+  );
+  return usable
+    .filter((n): n is string => n !== null)
     .sort((a, b) => {
       const ka = key(a);
       const kb = key(b);

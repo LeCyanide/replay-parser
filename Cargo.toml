@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "render"]
+members = [".", "encode", "render"]
 
 [package]
 name = "wows-replay-parser"
@@ -25,4 +25,8 @@ serde_json = "1"
 thiserror = "2"
 
 [profile.release]
+opt-level = 3
+
+# OpenH264 is unusably slow at opt-level 0; keep debug builds and tests fast.
+[profile.dev.package."*"]
 opt-level = 3
