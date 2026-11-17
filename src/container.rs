@@ -32,9 +32,10 @@ const REPLAY_KEY: [u8; 16] =
 
 const BLOCK: usize = 8;
 
-/// A sanity cap on the up-front allocation, so a corrupt size field cannot
-/// request gigabytes before inflation even starts.
-const MAX_PREALLOC: usize = 512 * 1024 * 1024;
+/// Cap on the inflated packet stream, and on the up-front allocation. Real
+/// replays inflate about 3x (a 5 MB file to ~17 MB); this stops a crafted
+/// zlib stream (~1000:1) from exhausting memory.
+pub const MAX_STREAM: usize = 128 * 1024 * 1024;
 
 /// A parsed replay: its arena-info JSON and the decrypted, inflated packet
 /// stream.
@@ -171,8 +172,8 @@ impl Replay {
         let header = parse_header(bytes)?;
         let (meta, raw_meta) = decode_meta(header.raw_meta)?;
 
-        let mut decoder = flate2::read::ZlibDecoder::new(Decryptor::new(header.stream));
-        let mut packets = Vec::with_capacity((header.decompressed_size as usize).min(MAX_PREALLOC));
+        let mut decoder = flate2::read::ZlibDecoder::new(Decryptor::new(header.stream)).take(MAX_STREAM as u64 + 1);
+        let mut packets = Vec::with_capacity((header.decompressed_size as usize).min(MAX_STREAM));
         let mut chunk = vec![0u8; 64 * 1024];
         let stream_complete = loop {
             match decoder.read(&mut chunk) {
@@ -183,6 +184,9 @@ impl Replay {
         };
         if packets.is_empty() {
             return Err(Error::EmptyStream);
+        }
+        if packets.len() > MAX_STREAM {
+            return Err(Error::StreamTooLarge(MAX_STREAM));
         }
 
         Ok(Replay {
@@ -255,6 +259,26 @@ mod tests {
         assert!(!replay.stream_complete);
         assert!(!replay.packets.is_empty());
         assert!(payload.starts_with(&replay.packets));
+    }
+
+    #[test]
+    fn a_zlib_bomb_is_refused() {
+        let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+        let zeros = vec![0u8; 1024 * 1024];
+        for _ in 0..=MAX_STREAM / zeros.len() {
+            z.write_all(&zeros).unwrap();
+        }
+        let compressed = z.finish().unwrap();
+        let mut file = Vec::new();
+        for v in [0x11343212u32, 1, META.len() as u32] {
+            file.extend_from_slice(&v.to_le_bytes());
+        }
+        file.extend_from_slice(META.as_bytes());
+        for v in [u32::MAX, compressed.len() as u32] {
+            file.extend_from_slice(&v.to_le_bytes());
+        }
+        file.extend_from_slice(&encrypt(&compressed));
+        assert!(matches!(Replay::from_bytes(&file), Err(Error::StreamTooLarge(_))));
     }
 
     #[test]

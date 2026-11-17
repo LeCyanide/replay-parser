@@ -12,6 +12,8 @@ pub enum Error {
     MetaJson(#[source] serde_json::Error),
     #[error("the packet stream inflated to nothing")]
     EmptyStream,
+    #[error("the packet stream inflates past {0} bytes; not a real replay")]
+    StreamTooLarge(usize),
     #[error("unparseable client version {0:?}")]
     BadVersion(String),
 }
