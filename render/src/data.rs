@@ -6,6 +6,8 @@
 //! <data>/maps/maps.json         map images and sizes, in the suite's seed format
 //! <data>/maps/<file>            the images it names
 //! <data>/fonts/*.ttf|otf|ttc    optional fallback fonts for names Inter cannot show (CJK, …)
+//! <data>/battle_hud/            optional: the client's gui/battle_hud/ (markers_minimap/plane/,
+//!                               icon_frag/) for plane markers and kill-type icons
 //! ```
 //!
 //! `<key>` is the replay's build number (`13533378`) or, failing that, its
@@ -19,6 +21,7 @@ use replay_parser::Version;
 use replay_parser::defs::EntityDefs;
 use replay_parser::defs::ScriptDir;
 use replay_parser::gameparams::GameParams;
+use tiny_skia::Pixmap;
 
 #[derive(Debug, thiserror::Error)]
 pub enum DataError {
@@ -62,6 +65,18 @@ pub struct MapImage {
     pub png: Vec<u8>,
     /// Side of the playable square in world units, if `maps.json` gives it.
     pub space_size: Option<i32>,
+    /// The map's in-game name ("Mountain Range" for `58_RidgeNew`).
+    pub name: String,
+}
+
+/// The game's own minimap plane markers and kill-type icons. Empty when the
+/// data dir has none: planes are then drawn as shapes, kills named in words.
+#[derive(Default)]
+pub struct Icons {
+    /// By the draw command's icon key, e.g. `controllable/fighter_he_enemy`.
+    pub planes: HashMap<String, Pixmap>,
+    /// By file stem, e.g. `icon_frag_torpedo`.
+    pub frags: HashMap<String, Pixmap>,
 }
 
 pub struct DataDir {
@@ -122,6 +137,17 @@ impl DataDir {
         paths.into_iter().filter_map(|p| Some((p.clone(), std::fs::read(&p).ok()?))).collect()
     }
 
+    /// Plane and kill icons from `<data>/battle_hud/`; unreadable files are skipped.
+    pub fn icons(&self) -> Icons {
+        let hud = self.root.join("battle_hud");
+        let planes = hud.join("markers_minimap").join("plane");
+        let mut icons = Icons { frags: pngs(&hud.join("icon_frag")).collect(), ..Icons::default() };
+        for dir in ["airsupport", "consumables", "controllable"] {
+            icons.planes.extend(pngs(&planes.join(dir)).map(|(stem, pm)| (format!("{dir}/{stem}"), pm)));
+        }
+        icons
+    }
+
     /// The map image and its space size, by `spaces/<name>`.
     pub fn map(&self, space: &str) -> Result<Option<MapImage>, DataError> {
         let dir = self.root.join("maps");
@@ -141,8 +167,19 @@ impl DataDir {
         })?;
         let png =
             std::fs::read(&img).map_err(|e| DataError::Bad { path: img.display().to_string(), msg: e.to_string() })?;
-        Ok(Some(MapImage { png, space_size: m.space_size }))
+        Ok(Some(MapImage { png, space_size: m.space_size, name: m.name.clone() }))
     }
+}
+
+/// The PNGs in `dir`, by file stem.
+fn pngs(dir: &Path) -> impl Iterator<Item = (String, Pixmap)> {
+    std::fs::read_dir(dir).into_iter().flatten().filter_map(|e| {
+        let path = e.ok()?.path();
+        if path.extension()? != "png" {
+            return None;
+        }
+        Some((path.file_stem()?.to_str()?.to_owned(), Pixmap::load_png(&path).ok()?))
+    })
 }
 
 /// `<dir>/<file>` or `<dir>/assets/<file>` (the suite keeps images there).

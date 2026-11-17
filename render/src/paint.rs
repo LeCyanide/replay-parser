@@ -64,6 +64,19 @@ pub fn arc(pm: &mut Pixmap, x: f32, y: f32, r: f32, frac: f32, width: f32, c: Rg
     }
 }
 
+/// `img` scaled to `size` px on its longer side, centred on `(x, y)`.
+pub fn image(pm: &mut Pixmap, img: &Pixmap, x: f32, y: f32, size: f32, alpha: f32) {
+    let k = size / img.width().max(img.height()) as f32;
+    let (w, h) = (img.width() as f32 * k, img.height() as f32 * k);
+    let paint = tiny_skia::PixmapPaint {
+        opacity: alpha.clamp(0.0, 1.0),
+        quality: tiny_skia::FilterQuality::Bicubic,
+        ..Default::default()
+    };
+    let t = Transform::from_scale(k, k).post_translate(x - w / 2.0, y - h / 2.0);
+    pm.draw_pixmap(0, 0, img.as_ref(), &paint, t, None);
+}
+
 pub fn rect(pm: &mut Pixmap, x: f32, y: f32, w: f32, h: f32, c: Rgb, alpha: f32) {
     if let Some(r) = Rect::from_xywh(x, y, w.max(0.0), h.max(0.0)) {
         pm.fill_rect(r, &paint(c, alpha), Transform::identity(), None);
@@ -198,12 +211,14 @@ impl Glyphs {
         // Glyphs point up (screen −y, i.e. angle π/2); rotate to `yaw`.
         let rot = (std::f32::consts::FRAC_PI_2 - m.yaw).to_degrees();
         let t = Transform::from_scale(k, k).post_rotate(rot).post_translate(m.x, m.y);
+        let stroke =
+            |width: f32| Stroke { width: width / k, line_join: tiny_skia::LineJoin::Round, ..Stroke::default() };
+        // Spotted: a ring outside the icon. Stroked at twice the width
+        // first, so the fill covers its inner half and the icon is unchanged.
+        if let Some(c) = m.outline {
+            pm.stroke_path(path, &paint(c, m.alpha), &stroke(2.0 * 1.8), t, None);
+        }
         pm.fill_path(path, &paint(m.fill, m.alpha), FillRule::Winding, t, None);
-        let (edge, width) = match m.outline {
-            Some(c) => (c, 1.15),
-            None => (hex(0x080c11), 0.9),
-        };
-        let s = Stroke { width: width / k, line_join: tiny_skia::LineJoin::Round, ..Stroke::default() };
-        pm.stroke_path(path, &paint(edge, m.alpha), &s, t, None);
+        pm.stroke_path(path, &paint(hex(0x080c11), m.alpha), &stroke(0.9), t, None);
     }
 }

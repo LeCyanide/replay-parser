@@ -36,7 +36,7 @@ const result = await renderReplay({
 
 Options: `input`, `output?`, `dataDir`, `binary?` (a path, or
 `[command, ...args]`), `speed?`, `duration?`, `maxMb?`, `fps?`, `width?`,
-`height?`, `onProgress?`,
+`height?`, `grid?` (default `true`), `onProgress?`,
 `signal?`, `timeoutMs?` (default 120000; `0` disables).
 Result: `{ mp4?, path?, frames, bytes, warnings }`.
 

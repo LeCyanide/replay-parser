@@ -32,6 +32,7 @@ test("file input -> stdout returns an mp4 Buffer and passes the CLI contract arg
     fps: 24,
     width: 640,
     height: 360,
+    grid: false,
   });
   assert.ok(Buffer.isBuffer(r.mp4));
   assert.equal(r.path, undefined);
@@ -41,7 +42,7 @@ test("file input -> stdout returns an mp4 Buffer and passes the CLI contract arg
   assert.deepEqual(receivedArgs(r.mp4), [
     "/replays/a.wowsreplay", "--out", "-", "--data", "/data",
     "--speed", "16", "--duration", "12", "--max-mb", "6.5", "--fps", "24", "--width", "640", "--height", "360",
-    "--progress", "json",
+    "--no-grid", "--progress", "json",
   ]);
 });
 

@@ -120,6 +120,7 @@ pub fn render(
     let mut start = None;
     let mut first_clock_left = None;
     let mut prev_left: Option<i64> = None;
+    let mut time_limit = None;
     let mut decided = None;
     let mut last = 0f32;
     let mut extent = 0f32;
@@ -142,6 +143,7 @@ pub fn render(
             // (the countdown itself starts with a small jump, 0 to 30).
             if start.is_none() && prev_left.is_some_and(|p| left > p + 60) {
                 start = Some(world.clock);
+                time_limit = Some(left as f32);
             }
             prev_left = Some(left);
         }
@@ -188,14 +190,18 @@ pub fn render(
     let (w, h) = (opts.width, opts.height);
     let map_px = h.min(w);
     let side_w = (w - map_px) as f32;
-    let mut layer = MapLayer::new(map_px, map.as_ref().map(|m| m.png.as_slice()));
     let painter = SidebarPainter::default();
+    let icons = data.icons();
+    if icons.planes.is_empty() {
+        warnings.push("no battle_hud icons in the data dir: planes drawn as shapes, kills named in words".into());
+    }
     let mut text = Text::new();
     for (path, bytes) in data.fonts() {
         if !text.add_fallback(bytes) {
             warnings.push(format!("{}: not a font this renderer can read; skipped", path.display()));
         }
     }
+    let mut layer = MapLayer::new(map_px, map.as_ref().map(|m| m.png.as_slice()), opts.grid, &mut text);
     let fps = opts.fps as f32;
     let battle = span.end - span.start;
     let hold = if opts.hold_end { (fps * HOLD_SECONDS) as u32 } else { 0 };
@@ -226,13 +232,13 @@ pub fn render(
     let mut cap_events: Vec<Event> = Vec::new();
     let mut frame = Pixmap::new(w, h).ok_or_else(|| RenderError::Internal("bad frame size".into()))?;
     let mut k = 0u32;
-    let title = map_title(&meta.map_display_name);
+    let title = map.as_ref().map_or_else(|| map_title(&meta.map_display_name), |m| m.name.clone());
     let subtitle = subtitle(meta, &labels, &world);
     let mut paint_frame =
         |world: &World, t: f32, frame: &mut Pixmap, cap_events: &mut Vec<Event>, caps_seen: &mut BTreeMap<u32, i64>| {
             let cmds = draw::frame(world, &geometry, &labels, gp, &flights, t);
             frame.draw_pixmap(0, 0, layer.background.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
-            layer.paint(frame, &mut text, &cmds, world, t);
+            layer.paint(frame, &mut text, &icons, &cmds, world, t);
             track_caps(world, t - span.start, caps_seen, cap_events);
             let sb = sidebar(
                 world,
@@ -241,11 +247,12 @@ pub fn render(
                 cap_events,
                 span.start,
                 speed,
+                time_limit,
                 title.clone(),
                 subtitle.clone(),
                 death_reasons,
             );
-            painter.paint(frame, &mut text, &sb, map_px as f32, side_w, h as f32);
+            painter.paint(frame, &mut text, &icons, &sb, map_px as f32, side_w, h as f32);
         };
     for p in Packets::new(&replay.packets, version) {
         let event = decoder.feed(&p).ok().flatten();
@@ -283,7 +290,7 @@ pub fn render(
     Ok(Summary { frames: k, warnings, battle_seconds: battle, speed })
 }
 
-/// `42_Neighbors` → `Neighbors`.
+/// `42_Neighbors` → `Neighbors`, for maps `maps.json` doesn't name.
 fn map_title(display: &str) -> String {
     let s = display.trim_start_matches(|c: char| c.is_ascii_digit()).trim_start_matches('_');
     s.replace('_', " ")
@@ -291,12 +298,13 @@ fn map_title(display: &str) -> String {
 
 fn subtitle(meta: &replay_parser::ReplayMeta, labels: &draw::Labels, world: &World) -> String {
     let mode = match meta.game_type.as_deref() {
-        Some("RandomBattle") => "Random battle".to_owned(),
-        Some("RankedBattle") => "Ranked battle".to_owned(),
-        Some("ClanBattle") => "Clan battle".to_owned(),
-        Some("CooperativeBattle") => "Co-op battle".to_owned(),
+        // Short, so the player and ship fit beside them.
+        Some("RandomBattle") => "Random".to_owned(),
+        Some("RankedBattle") => "Ranked".to_owned(),
+        Some("ClanBattle") => "Clan".to_owned(),
+        Some("CooperativeBattle") => "Co-op".to_owned(),
         Some("PVE") => "Operation".to_owned(),
-        Some("EventBattle") => "Event battle".to_owned(),
+        Some("EventBattle") => "Event".to_owned(),
         Some(other) => other.to_owned(),
         None => meta.scenario.clone(),
     };
@@ -351,6 +359,7 @@ fn sidebar(
     cap_events: &[Event],
     start: f32,
     speed: f32,
+    time_limit: Option<f32>,
     title: String,
     subtitle: String,
     death_reasons: Option<&[String]>,
@@ -398,6 +407,7 @@ fn sidebar(
         };
         Some(Who { name, class: Class::of(species.as_deref()), ally })
     };
+    let reason = |code: i64| replay_parser::constants::death_reason(code, death_reasons);
     let mut events: Vec<Event> = world
         .deaths
         .iter()
@@ -407,7 +417,8 @@ fn sidebar(
                 kind: EventKind::Kill {
                     killer: (d.killer != 0 && d.killer != d.victim).then(|| who(d.killer)).flatten(),
                     victim: who(d.victim)?,
-                    verb: kill_verb(replay_parser::constants::death_reason(d.reason, death_reasons)),
+                    verb: kill_verb(reason(d.reason)),
+                    frag: frag_icon(reason(d.reason)),
                 },
             })
         })
@@ -421,7 +432,7 @@ fn sidebar(
     }));
     events.sort_by(|a, b| a.t.total_cmp(&b.t));
 
-    let caps = cmds
+    let mut caps: Vec<Cap> = cmds
         .iter()
         .filter_map(|c| match c {
             Draw::CapturePoint { label, color, invader_color, progress, .. } => {
@@ -430,12 +441,14 @@ fn sidebar(
             _ => None,
         })
         .collect();
+    caps.sort_by(|a, b| a.label.cmp(&b.label));
     let score = |team: Option<i64>| team.and_then(|t| world.scores.get(t as usize).copied()).unwrap_or(0);
     let enemy_team = own.map(|o| 1 - o);
     Sidebar {
         title,
         subtitle,
         time_left: world.time_left,
+        time_limit,
         speed,
         ally_score: score(own),
         enemy_score: score(enemy_team),

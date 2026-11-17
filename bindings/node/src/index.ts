@@ -80,6 +80,8 @@ export interface RenderOptions {
   width?: number;
   /** Pixels (CLI default 720). */
   height?: number;
+  /** Draw the minimap grid (1–10, A–J) over the map. Default true. */
+  grid?: boolean;
   onProgress?: (p: Progress) => void;
   signal?: AbortSignal;
   /** Kill the child after this many ms. Default 120000. 0 or Infinity disables. */
@@ -231,6 +233,7 @@ function buildArgs(opts: RenderOptions, fromStdin: boolean): string[] {
   num("--fps", opts.fps);
   num("--width", opts.width);
   num("--height", opts.height);
+  if (opts.grid === false) args.push("--no-grid");
   args.push("--progress", "json");
   return args;
 }

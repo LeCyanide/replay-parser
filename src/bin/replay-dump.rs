@@ -19,7 +19,8 @@
 //!   replay-dump datapack <game dir> <out dir> [build] [key]
 //!       writes what wows-render needs for one build (default: the newest)
 //!       into a data directory: <out>/defs/<key>/ (entity definitions) and
-//!       <out>/gameparams/<key>.json (GameParams extract and ship names).
+//!       <out>/gameparams/<key>.json (GameParams extract and ship names), and
+//!       <out>/battle_hud/ (minimap plane markers and kill-type icons).
 //!       <key> defaults to the build number; name it after the version
 //!       (15_10_0) to serve every regional build of it.
 
@@ -242,6 +243,21 @@ fn datapack(
         std::fs::write(&dest, res.read(p)?)?;
         n += 1;
     }
+    // Minimap plane markers and kill-type icons, shared by every build.
+    let mut icons = 0;
+    for p in res.paths() {
+        let Some(rel) = p.strip_prefix("gui/battle_hud/") else { continue };
+        if !(rel.starts_with("markers_minimap/plane/") || rel.starts_with("icon_frag/")) || !rel.ends_with(".png") {
+            continue;
+        }
+        let dest = out.join("battle_hud").join(rel);
+        std::fs::create_dir_all(dest.parent().ok_or("bad path")?)?;
+        std::fs::write(&dest, res.read(p)?)?;
+        icons += 1;
+    }
+    if icons == 0 {
+        eprintln!("warning: no gui/battle_hud icons found; planes will be drawn as shapes");
+    }
     // Checks the copy loads before anything relies on it.
     EntityDefs::load(&ScriptDir(defs.clone()))?;
     let gp = replay_parser::gameparams::GameParams::load(res)?;
@@ -269,7 +285,7 @@ fn datapack(
     std::fs::create_dir_all(&gp_dir)?;
     let path = gp_dir.join(format!("{key}.json"));
     std::fs::write(&path, serde_json::to_vec(&json)?)?;
-    eprintln!("{n} definition files in {}, {} ships in {}", defs.display(), names.len(), path.display());
+    eprintln!("{n} definition files in {}, {} ships in {}, {icons} icons", defs.display(), names.len(), path.display());
     Ok(())
 }
 

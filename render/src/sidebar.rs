@@ -4,6 +4,7 @@
 
 use tiny_skia::Pixmap;
 
+use crate::data::Icons;
 use crate::map::ALLY;
 use crate::map::ENEMY;
 use crate::paint::*;
@@ -43,6 +44,9 @@ pub enum EventKind {
         victim: Who,
         /// As the feed shows it: "sank", "torpedoed", "burned", …
         verb: &'static str,
+        /// The game's kill-type icon for it (`icon_frag_torpedo`), drawn
+        /// in place of the verb when the data dir has it.
+        frag: &'static str,
     },
     /// A cap changed hands; `owner` None when neutralised.
     Cap { label: String, owner: Option<bool> },
@@ -66,6 +70,9 @@ pub struct Sidebar {
     pub subtitle: String,
     /// Seconds left on the battle clock.
     pub time_left: Option<i64>,
+    /// The battle's time limit in seconds: event times then read as the
+    /// header's countdown clock instead of time since the start.
+    pub time_limit: Option<f32>,
     /// Playback speed against real time.
     pub speed: f32,
     pub ally_score: i64,
@@ -95,7 +102,8 @@ pub struct SidebarPainter {
 
 impl SidebarPainter {
     /// Paints the sidebar into the `w`×`h` area of `pm` at `x0`.
-    pub fn paint(&self, pm: &mut Pixmap, text: &mut Text, s: &Sidebar, x0: f32, w: f32, h: f32) {
+    #[allow(clippy::too_many_arguments)]
+    pub fn paint(&self, pm: &mut Pixmap, text: &mut Text, icons: &Icons, s: &Sidebar, x0: f32, w: f32, h: f32) {
         // Layout is authored for a 720 px tall frame and scaled.
         let u = h / 720.0;
         let pad = 14.0 * u;
@@ -210,7 +218,8 @@ impl SidebarPainter {
             // Newest is brightest.
             let age = (s.events.len() - skip - 1 - k) as f32;
             let a = (1.0 - age * 0.06).max(0.55);
-            self.event(pm, text, e, x0 + pad, ey, w - 2.0 * pad, u, a);
+            let at = s.time_limit.map_or(e.t, |l| l - e.t);
+            self.event(pm, text, icons, e, at, x0 + pad, ey, w - 2.0 * pad, u, a);
         }
     }
 
@@ -238,7 +247,7 @@ impl SidebarPainter {
         );
         let tx = x + 8.0 * u + g;
         let px = 11.0 * u;
-        let name = text.fit(&r.name, px, Weight::Regular, w - (tx - x) - 3.0 * u);
+        let name = text.fit_name(&r.name, px, Weight::Regular, w - (tx - x) - 3.0 * u);
         let color = if !r.alive {
             FG_FAINT
         } else if r.is_self {
@@ -261,9 +270,21 @@ impl SidebarPainter {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn event(&self, pm: &mut Pixmap, text: &mut Text, e: &Event, x: f32, y: f32, w: f32, u: f32, a: f32) {
+    fn event(
+        &self,
+        pm: &mut Pixmap,
+        text: &mut Text,
+        icons: &Icons,
+        e: &Event,
+        at: f32,
+        x: f32,
+        y: f32,
+        w: f32,
+        u: f32,
+        a: f32,
+    ) {
         let px = 11.0 * u;
-        text.draw(pm, &clock(e.t), x, y, 10.5 * u, Weight::Regular, Align::Left, FG_FAINT, a);
+        text.draw(pm, &clock(at), x, y, 10.5 * u, Weight::Regular, Align::Left, FG_FAINT, a);
         let mut cx = x + 38.0 * u;
         let end = x + w;
         let who = |pm: &mut Pixmap, text: &mut Text, cx: &mut f32, wh: &Who, max: f32| {
@@ -282,19 +303,31 @@ impl SidebarPainter {
                 },
             );
             *cx += g + 3.0 * u;
-            let n = text.fit(&wh.name, px, Weight::Regular, max - g - 3.0 * u);
+            let n = text.fit_name(&wh.name, px, Weight::Regular, max - g - 3.0 * u);
             *cx += text.draw(pm, &n, *cx, y, px, Weight::Regular, Align::Left, side(wh.ally), a) + 5.0 * u;
         };
         match &e.kind {
-            EventKind::Kill { killer, victim, verb } => {
-                let verb_w = text.width(verb, px, Weight::Regular) + 5.0 * u;
+            EventKind::Kill { killer, victim, verb, frag } => {
+                // The game's kill icon between the names, as its kill feed shows them.
+                let icon = icons.frags.get(*frag).or_else(|| icons.frags.get("frags"));
+                let icon_px = 15.0 * u;
+                let verb_w = match icon {
+                    Some(_) => icon_px + 8.0 * u,
+                    None => text.width(verb, px, Weight::Regular) + 5.0 * u,
+                };
                 let half = (end - cx - verb_w) / 2.0;
-                match killer {
-                    Some(k) => {
-                        who(pm, text, &mut cx, k, half);
+                if let Some(k) = killer {
+                    who(pm, text, &mut cx, k, half);
+                }
+                match (icon, killer) {
+                    (Some(img), _) => {
+                        image(pm, img, cx + icon_px / 2.0, y - text.cap_height(px) / 2.0, icon_px, a);
+                        cx += verb_w;
+                    }
+                    (None, Some(_)) => {
                         cx += text.draw(pm, verb, cx, y, px, Weight::Regular, Align::Left, FG_DIM, a) + 5.0 * u;
                     }
-                    None => {
+                    (None, None) => {
                         cx += text.draw(pm, "Sunk:", cx, y, px, Weight::Regular, Align::Left, FG_DIM, a) + 5.0 * u;
                     }
                 }
@@ -325,6 +358,32 @@ impl SidebarPainter {
                 text.draw(pm, msg, cx, y, px, Weight::Regular, Align::Left, c, a);
             }
         }
+    }
+}
+
+/// The game's kill-type icon (`<data>/battle_hud/icon_frag/<stem>.png`) for a
+/// death reason constant; `frags` is its generic one.
+pub fn frag_icon(reason: Option<&str>) -> &'static str {
+    match reason {
+        Some("ARTILLERY" | "AP_SHELL" | "HE_SHELL" | "CS_SHELL") => "icon_frag_main_caliber",
+        Some("ATBA") => "icon_frag_atba",
+        Some("TORPEDO" | "TBOMB") => "icon_frag_torpedo",
+        Some("BOMB") => "icon_frag_bomb",
+        Some("SKIP_BOMB") => "icon_frag_skip",
+        Some("BURNING") => "icon_frag_burning",
+        Some("FLOOD") => "icon_frag_flood",
+        Some("RAM") => "icon_frag_ram",
+        Some("DETONATE") => "icon_frag_detonate",
+        Some("SEA_MINE") => "icon_frag_naval_mine",
+        Some("DBOMB" | "ADBOMB") => "icon_frag_depthbomb",
+        Some("ROCKET") => "icon_frag_rocket",
+        Some("MISSILE") => "icon_frag_missile",
+        Some("ACID") => "icon_frag_acid",
+        Some("LASER") => "icon_frag_laser",
+        Some("FEL") => "icon_frag_fel",
+        Some("PORTAL") => "icon_frag_portal",
+        Some("SECTOR_WAVE") => "icon_frag_wave",
+        _ => "frags",
     }
 }
 
