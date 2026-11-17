@@ -66,6 +66,9 @@ pub struct Sidebar {
     pub subtitle: String,
     /// Seconds left on the battle clock.
     pub time_left: Option<i64>,
+    /// The battle's time limit in seconds: event times then read as the
+    /// header's countdown clock instead of time since the start.
+    pub time_limit: Option<f32>,
     /// Playback speed against real time.
     pub speed: f32,
     pub ally_score: i64,
@@ -210,7 +213,8 @@ impl SidebarPainter {
             // Newest is brightest.
             let age = (s.events.len() - skip - 1 - k) as f32;
             let a = (1.0 - age * 0.06).max(0.55);
-            self.event(pm, text, e, x0 + pad, ey, w - 2.0 * pad, u, a);
+            let at = s.time_limit.map_or(e.t, |l| l - e.t);
+            self.event(pm, text, e, at, x0 + pad, ey, w - 2.0 * pad, u, a);
         }
     }
 
@@ -261,9 +265,9 @@ impl SidebarPainter {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn event(&self, pm: &mut Pixmap, text: &mut Text, e: &Event, x: f32, y: f32, w: f32, u: f32, a: f32) {
+    fn event(&self, pm: &mut Pixmap, text: &mut Text, e: &Event, at: f32, x: f32, y: f32, w: f32, u: f32, a: f32) {
         let px = 11.0 * u;
-        text.draw(pm, &clock(e.t), x, y, 10.5 * u, Weight::Regular, Align::Left, FG_FAINT, a);
+        text.draw(pm, &clock(at), x, y, 10.5 * u, Weight::Regular, Align::Left, FG_FAINT, a);
         let mut cx = x + 38.0 * u;
         let end = x + w;
         let who = |pm: &mut Pixmap, text: &mut Text, cx: &mut f32, wh: &Who, max: f32| {

@@ -120,6 +120,7 @@ pub fn render(
     let mut start = None;
     let mut first_clock_left = None;
     let mut prev_left: Option<i64> = None;
+    let mut time_limit = None;
     let mut decided = None;
     let mut last = 0f32;
     let mut extent = 0f32;
@@ -142,6 +143,7 @@ pub fn render(
             // (the countdown itself starts with a small jump, 0 to 30).
             if start.is_none() && prev_left.is_some_and(|p| left > p + 60) {
                 start = Some(world.clock);
+                time_limit = Some(left as f32);
             }
             prev_left = Some(left);
         }
@@ -188,7 +190,6 @@ pub fn render(
     let (w, h) = (opts.width, opts.height);
     let map_px = h.min(w);
     let side_w = (w - map_px) as f32;
-    let mut layer = MapLayer::new(map_px, map.as_ref().map(|m| m.png.as_slice()));
     let painter = SidebarPainter::default();
     let mut text = Text::new();
     for (path, bytes) in data.fonts() {
@@ -196,6 +197,7 @@ pub fn render(
             warnings.push(format!("{}: not a font this renderer can read; skipped", path.display()));
         }
     }
+    let mut layer = MapLayer::new(map_px, map.as_ref().map(|m| m.png.as_slice()), &mut text);
     let fps = opts.fps as f32;
     let battle = span.end - span.start;
     let hold = if opts.hold_end { (fps * HOLD_SECONDS) as u32 } else { 0 };
@@ -241,6 +243,7 @@ pub fn render(
                 cap_events,
                 span.start,
                 speed,
+                time_limit,
                 title.clone(),
                 subtitle.clone(),
                 death_reasons,
@@ -351,6 +354,7 @@ fn sidebar(
     cap_events: &[Event],
     start: f32,
     speed: f32,
+    time_limit: Option<f32>,
     title: String,
     subtitle: String,
     death_reasons: Option<&[String]>,
@@ -421,7 +425,7 @@ fn sidebar(
     }));
     events.sort_by(|a, b| a.t.total_cmp(&b.t));
 
-    let caps = cmds
+    let mut caps: Vec<Cap> = cmds
         .iter()
         .filter_map(|c| match c {
             Draw::CapturePoint { label, color, invader_color, progress, .. } => {
@@ -430,12 +434,14 @@ fn sidebar(
             _ => None,
         })
         .collect();
+    caps.sort_by(|a, b| a.label.cmp(&b.label));
     let score = |team: Option<i64>| team.and_then(|t| world.scores.get(t as usize).copied()).unwrap_or(0);
     let enemy_team = own.map(|o| 1 - o);
     Sidebar {
         title,
         subtitle,
         time_left: world.time_left,
+        time_limit,
         speed,
         ally_score: score(own),
         enemy_score: score(enemy_team),

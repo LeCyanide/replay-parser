@@ -200,7 +200,7 @@ impl Glyphs {
         let t = Transform::from_scale(k, k).post_rotate(rot).post_translate(m.x, m.y);
         pm.fill_path(path, &paint(m.fill, m.alpha), FillRule::Winding, t, None);
         let (edge, width) = match m.outline {
-            Some(c) => (c, 1.15),
+            Some(c) => (c, 1.8),
             None => (hex(0x080c11), 0.9),
         };
         let s = Stroke { width: width / k, line_join: tiny_skia::LineJoin::Round, ..Stroke::default() };

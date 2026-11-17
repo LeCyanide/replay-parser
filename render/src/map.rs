@@ -17,8 +17,17 @@ use crate::text::Weight;
 pub const ALLY: Rgb = [0x4c, 0xe8, 0xaa];
 pub const ENEMY: Rgb = [0xfe, 0x4d, 0x2a];
 const NEUTRAL_FILL: Rgb = [0x5f, 0x6d, 0x7c];
-const SPOTTED_OUTLINE: Rgb = [0xb3, 0x9a, 0x5e];
+const SPOTTED_OUTLINE: Rgb = [0xf5, 0xc8, 0x4c];
 const LABEL: Rgb = [0xe8, 0xee, 0xf6];
+/// Names of players whose client has dropped.
+const DISCONNECTED: Rgb = [0xff, 0x9f, 0x1c];
+/// Shell streaks; the tip carries the ammo type's colour.
+const TRACER: Rgb = [0xff, 0xc4, 0x3d];
+const OUTLINE: Rgb = [0x08, 0x0c, 0x11];
+/// Health by fraction, in the palette's tones rather than pure RGB.
+const HP_HIGH: Rgb = [0x7b, 0xd8, 0x8f];
+const HP_MID: Rgb = [0xf2, 0xc1, 0x4e];
+const HP_LOW: Rgb = [0xf0, 0x60, 0x3c];
 const SEA: Rgb = [0x10, 0x26, 0x38];
 const GRID: Rgb = [0xff, 0xff, 0xff];
 
@@ -28,8 +37,8 @@ const NAME_PX: f32 = 10.0;
 const HEALTH_W_PX: f32 = 22.0;
 const HEALTH_H_PX: f32 = 3.0;
 const TRACER_PX: f32 = 1.1;
-const TORPEDO_PX: f32 = 2.6;
-const PLANE_PX: f32 = 6.0;
+const TORPEDO_PX: f32 = 3.4;
+const PLANE_PX: f32 = 9.0;
 
 /// Battle seconds of track drawn behind each ship (about 1.2 s of video at ×32).
 const TRAIL_SECONDS: f32 = 40.0;
@@ -54,25 +63,30 @@ pub struct MapLayer {
 }
 
 impl MapLayer {
-    pub fn new(size: u32, png: Option<&[u8]>) -> Self {
+    pub fn new(size: u32, png: Option<&[u8]>, text: &mut Text) -> Self {
         let mut bg = Pixmap::new(size, size).expect("non-zero map size");
         bg.fill(tiny_skia::Color::from_rgba8(SEA[0], SEA[1], SEA[2], 255));
-        let image = png.and_then(|b| Pixmap::decode_png(b).ok());
-        match &image {
-            Some(img) => {
-                let k = size as f32 / img.width().max(img.height()) as f32;
-                let paint = PixmapPaint { quality: FilterQuality::Bicubic, ..PixmapPaint::default() };
-                bg.draw_pixmap(0, 0, img.as_ref(), &paint, Transform::from_scale(k, k), None);
-            }
-            None => {
-                // A 10×10 grid, as the in-game minimap has.
-                let s = size as f32;
-                for i in 1..10 {
-                    let p = s * i as f32 / 10.0;
-                    line(&mut bg, [p, 0.0], [p, s], 1.0, GRID, 0.08);
-                    line(&mut bg, [0.0, p], [s, p], 1.0, GRID, 0.08);
-                }
-            }
+        if let Some(img) = png.and_then(|b| Pixmap::decode_png(b).ok()) {
+            let k = size as f32 / img.width().max(img.height()) as f32;
+            let paint = PixmapPaint { quality: FilterQuality::Bicubic, ..PixmapPaint::default() };
+            bg.draw_pixmap(0, 0, img.as_ref(), &paint, Transform::from_scale(k, k), None);
+        }
+        // The in-game minimap's 10×10 grid: columns 1–10, rows A–J.
+        let s = size as f32;
+        let cell = s / 10.0;
+        for i in 1..10 {
+            let p = cell * i as f32;
+            line(&mut bg, [p, 0.0], [p, s], 1.0, GRID, 0.12);
+            line(&mut bg, [0.0, p], [s, p], 1.0, GRID, 0.12);
+        }
+        let px = s / 768.0 * 11.0;
+        for i in 0..10u8 {
+            let c = cell * (f32::from(i) + 0.5);
+            let col = (i + 1).to_string();
+            text.draw(&mut bg, &col, c, px * 1.3, px, Weight::Bold, Align::Center, GRID, 0.35);
+            let row = char::from(b'A' + i).to_string();
+            let y = c + text.cap_height(px) / 2.0;
+            text.draw(&mut bg, &row, px * 0.5, y, px, Weight::Bold, Align::Left, GRID, 0.35);
         }
         Self { background: bg, size, glyphs: Glyphs::default(), trails: std::collections::BTreeMap::new() }
     }
@@ -137,55 +151,49 @@ impl MapLayer {
                     let [x, y] = p(*pos);
                     fill_circle(pm, x, y, r(*radius), *color, *alpha);
                 }
-                Draw::ConsumableRadius { pos, radius, color, alpha, .. }
-                | Draw::PatrolRadius { pos, radius, color, alpha, .. } => {
+                Draw::ConsumableRadius { pos, radius, color, .. } => {
+                    // Radar, hydro and the like: a tinted disc with a clear edge.
+                    let [x, y] = p(*pos);
+                    fill_circle(pm, x, y, r(*radius), *color, 0.10);
+                    stroke_circle(pm, x, y, r(*radius), 1.6 * k, *color, 0.85);
+                }
+                Draw::PatrolRadius { pos, radius, color, alpha, .. } => {
                     let [x, y] = p(*pos);
                     stroke_circle(pm, x, y, r(*radius), k, *color, (*alpha * 3.0).min(0.6));
                 }
-                Draw::ShotTracer { from, to, color, secondary } => {
+                Draw::ShotTracer { from, to, secondary, .. } => {
                     let w = if *secondary { TRACER_PX * 0.7 } else { TRACER_PX } * k;
-                    line(pm, p(*from), p(*to), w, *color, if *secondary { 0.35 } else { 0.85 });
+                    line(pm, p(*from), p(*to), w, TRACER, if *secondary { 0.4 } else { 0.9 });
                 }
                 Draw::ShotTracerTip { at, color, secondary } => {
+                    // The ammo type's colour (AP blue, HE orange, SAP red) on a dark rim.
                     let [x, y] = p(*at);
-                    fill_circle(
-                        pm,
-                        x,
-                        y,
-                        if *secondary { 1.0 } else { 1.5 } * k,
-                        *color,
-                        if *secondary { 0.5 } else { 1.0 },
-                    );
+                    let (rad, a) = if *secondary { (1.3, 0.6) } else { (2.0, 1.0) };
+                    fill_circle(pm, x, y, (rad + 0.6) * k, OUTLINE, 0.7 * a);
+                    fill_circle(pm, x, y, rad * k, *color, a);
                 }
                 Draw::Torpedo { pos, color } => {
                     let [x, y] = p(*pos);
-                    fill_circle(pm, x, y, TORPEDO_PX / 2.0 * k, *color, 1.0);
+                    let rad = TORPEDO_PX / 2.0 * k;
+                    fill_circle(pm, x, y, rad + 0.8 * k, OUTLINE, 0.8);
+                    fill_circle(pm, x, y, rad, *color, 1.0);
                 }
-                Draw::Plane { pos, .. } => {
+                Draw::Plane { pos, icon_key, .. } => {
                     let [x, y] = p(*pos);
-                    let s = PLANE_PX / 2.0 * k;
-                    let mut pb = tiny_skia::PathBuilder::new();
-                    pb.move_to(x, y - s);
-                    pb.line_to(x + s, y);
-                    pb.line_to(x, y + s);
-                    pb.line_to(x - s, y);
-                    pb.close();
-                    if let Some(path) = pb.finish() {
-                        pm.fill_path(
-                            &path,
-                            &paint(hex(0xffd479), 0.9),
-                            tiny_skia::FillRule::Winding,
-                            Transform::identity(),
-                            None,
-                        );
-                    }
+                    let color = if icon_key.ends_with("_enemy") { ENEMY } else { ALLY };
+                    plane_icon(pm, PlaneKind::of(icon_key), x, y, PLANE_PX / 2.0 * k, color);
                 }
                 Draw::CameraDirection { pos, yaw, color, length, .. } => {
                     let [x, y] = p(*pos);
                     let len = r(*length);
                     line(pm, [x, y], [x + yaw.cos() * len, y - yaw.sin() * len], k, *color, 0.7);
                 }
-                Draw::HealthBar { pos, fraction, fill_color, background_color, background_alpha, .. } => {
+                Draw::HealthBar { pos, fraction, background_color, background_alpha, .. } => {
+                    let fill_color = match *fraction {
+                        f if f > 0.66 => &HP_HIGH,
+                        f if f > 0.33 => &HP_MID,
+                        _ => &HP_LOW,
+                    };
                     let [x, y] = p(*pos);
                     let (w, h) = (HEALTH_W_PX * k, HEALTH_H_PX * k);
                     let (bx, by) = (x - w / 2.0, y - ship_size * 0.75);
@@ -221,7 +229,7 @@ impl MapLayer {
                     player_name,
                     ship_name,
                     is_detected_teammate,
-                    name_color,
+                    is_disconnected,
                     ..
                 } => {
                     let [x, y] = p(*pos);
@@ -244,7 +252,7 @@ impl MapLayer {
                             text: l.to_owned(),
                             x,
                             y,
-                            color: name_color.unwrap_or(LABEL),
+                            color: if *is_disconnected { DISCONNECTED } else { LABEL },
                             alpha: (alpha + 0.25).min(1.0),
                             detected: *detected,
                             is_self: *is_self,
@@ -369,12 +377,111 @@ fn place_labels(pm: &mut Pixmap, text: &mut Text, mut labels: Vec<NameLabel>, ma
         });
         let (at, alpha) = match free {
             Some(c) => (c, l.alpha),
-            None if l.detected || l.is_self => (below, l.alpha * 0.45),
+            // The recording player's name never fades.
+            None if l.is_self => (below, l.alpha),
+            None if l.detected => (below, l.alpha * 0.45),
             None => continue,
         };
         placed.push(rect(at));
         // A dark halo keeps names readable over bright map areas.
         text.draw(pm, &l.text, at.0 + 0.6, at.1 + 0.6, px, Weight::Bold, Align::Left, [0; 3], 0.6 * alpha);
         text.draw(pm, &l.text, at.0, at.1, px, Weight::Bold, Align::Left, l.color, alpha);
+    }
+}
+
+/// Squadron types, from the draw command's icon key
+/// (`controllable/bomber_he_enemy`, `consumables/fighter_ally`, …).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlaneKind {
+    /// Catapult and CV patrol fighters.
+    Fighter,
+    /// Rocket planes.
+    Attack,
+    Dive,
+    Torpedo,
+    Skip,
+    /// Airstrikes: depth charges, mines.
+    Support,
+    /// Spotters, airships, anything else.
+    Scout,
+}
+
+impl PlaneKind {
+    pub fn of(icon_key: &str) -> Self {
+        let (dir, base) = icon_key.split_once('/').unwrap_or(("", icon_key));
+        match dir {
+            "airsupport" => PlaneKind::Support,
+            "consumables" if base.starts_with("fighter") => PlaneKind::Fighter,
+            "consumables" => PlaneKind::Scout,
+            _ if base.starts_with("fighter") => PlaneKind::Attack,
+            _ if base.starts_with("bomber") => PlaneKind::Dive,
+            _ if base.starts_with("torpedo") => PlaneKind::Torpedo,
+            _ if base.starts_with("skip") => PlaneKind::Skip,
+            _ => PlaneKind::Scout,
+        }
+    }
+}
+
+/// A squadron marker of half-size `s`: one shape per type, in the team colour
+/// on a dark rim.
+fn plane_icon(pm: &mut Pixmap, kind: PlaneKind, x: f32, y: f32, s: f32, color: Rgb) {
+    let mut pb = tiny_skia::PathBuilder::new();
+    let mut poly = |pts: &[(f32, f32)]| {
+        for (i, &(px, py)) in pts.iter().enumerate() {
+            if i == 0 { pb.move_to(x + px * s, y + py * s) } else { pb.line_to(x + px * s, y + py * s) }
+        }
+        pb.close();
+    };
+    match kind {
+        // A chevron, pointing up.
+        PlaneKind::Fighter => poly(&[(0.0, -1.0), (1.0, 0.6), (0.4, 0.6), (0.0, -0.1), (-0.4, 0.6), (-1.0, 0.6)]),
+        PlaneKind::Attack => poly(&[(0.0, -1.0), (1.0, 0.0), (0.0, 1.0), (-1.0, 0.0)]),
+        // Pointing down: it dives.
+        PlaneKind::Dive => poly(&[(-1.0, -0.8), (1.0, -0.8), (0.0, 1.0)]),
+        PlaneKind::Skip => poly(&[(-0.8, -0.8), (0.8, -0.8), (0.8, 0.8), (-0.8, 0.8)]),
+        // A plus sign.
+        PlaneKind::Support => poly(&[
+            (-0.35, -1.0),
+            (0.35, -1.0),
+            (0.35, -0.35),
+            (1.0, -0.35),
+            (1.0, 0.35),
+            (0.35, 0.35),
+            (0.35, 1.0),
+            (-0.35, 1.0),
+            (-0.35, 0.35),
+            (-1.0, 0.35),
+            (-1.0, -0.35),
+            (-0.35, -0.35),
+        ]),
+        PlaneKind::Torpedo => pb.push_circle(x, y, s * 0.9),
+        PlaneKind::Scout => pb.push_circle(x, y, s * 0.55),
+    }
+    let Some(path) = pb.finish() else { return };
+    let rim =
+        tiny_skia::Stroke { width: (s * 0.35).max(1.0), line_join: tiny_skia::LineJoin::Round, ..Default::default() };
+    pm.stroke_path(&path, &paint(OUTLINE, 0.85), &rim, Transform::identity(), None);
+    pm.fill_path(&path, &paint(color, 0.95), tiny_skia::FillRule::Winding, Transform::identity(), None);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PlaneKind;
+
+    #[test]
+    fn plane_kinds_from_icon_keys() {
+        for (key, kind) in [
+            ("consumables/fighter_ally", PlaneKind::Fighter),
+            ("consumables/scout_enemy", PlaneKind::Scout),
+            ("controllable/fighter_he_enemy", PlaneKind::Attack),
+            ("controllable/bomber_ap_ally", PlaneKind::Dive),
+            ("controllable/torpedo_regular_ally", PlaneKind::Torpedo),
+            ("controllable/torpedo_deepwater_enemy", PlaneKind::Torpedo),
+            ("controllable/skip_he_ally", PlaneKind::Skip),
+            ("airsupport/bomber_depth_charge_ally", PlaneKind::Support),
+            ("controllable/auxiliary_enemy", PlaneKind::Scout),
+        ] {
+            assert_eq!(PlaneKind::of(key), kind, "{key}");
+        }
     }
 }
