@@ -134,10 +134,8 @@ alone. What is left is mostly data for new game builds, and polish.
 4. **Patch cadence** ☁ — every game patch needs a new data pack before the
    bot can render its replays. Option: fall back to the nearest older
    definitions when decode failures stay near zero (today: refused).
-5. **Render polish** ☁ — the subtitle is cut off on long player/ship names;
-   the event area is mostly empty early in a battle; the result banner
-   covers the middle of the map; lineups and the feed get cramped in large
-   battles (Operations).
+5. **Render polish** ☁ — lineups and the feed may get cramped in large
+   battles (Operations); no test replay has more than 24 ships.
 6. **Draw-command gaps** ☁ — now ours to fix rather than match: the
    tracer's ammo type is passed only as a colour (the renderer maps it back;
    see `shortcut:` in `render/src/map.rs`), spotting reasons are unnamed,

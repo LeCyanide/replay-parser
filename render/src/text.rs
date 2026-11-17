@@ -41,6 +41,27 @@ fn flag(pm: &mut Pixmap, x: f32, y: f32, px: f32, paint: &Paint) {
     }
 }
 
+/// Titles the game abbreviates in ship names; other leading words become
+/// their initial.
+const TITLES: &[(&str, &str)] = &[("Almirante", "Almte."), ("Admiral", "Adm.")];
+
+/// A word of a name that can be shortened or kept as its identifying part:
+/// capitalised, not all capitals (II, CLR, HSF), not the "Golden" variant tag.
+fn proper(w: &str) -> bool {
+    w.chars().next().is_some_and(char::is_uppercase) && w.chars().any(char::is_lowercase) && w != "Golden"
+}
+
+/// "Almirante" → "Almte.", "Marcantonio" → "M."; None for words that stay.
+fn abbreviate(w: &str) -> Option<String> {
+    if !proper(w) || w.ends_with('.') {
+        return None;
+    }
+    if let Some((_, short)) = TITLES.iter().find(|(t, _)| *t == w) {
+        return Some((*short).to_owned());
+    }
+    w.chars().next().map(|c| format!("{c}."))
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Weight {
     Regular,
@@ -165,6 +186,27 @@ impl Text {
         self.layout(s, px, w).1
     }
 
+    /// A ship name made to fit `max` pixels the way the game shortens its own
+    /// names: leading words become initials, one at a time from the left,
+    /// until it fits ("Marcantonio Colonna" → "M. Colonna", "Almirante
+    /// Cochrane" → "Almte. Cochrane", "Alberico da Barbiano" → "A. da
+    /// Barbiano"). The last proper word and anything after it ("'44",
+    /// "Golden") stay, as do particles and capitals ("da", "II", "HSF").
+    /// Cut with an ellipsis only if that is still too long.
+    pub fn fit_name(&self, s: &str, px: f32, w: Weight, max: f32) -> String {
+        let mut words: Vec<String> = s.split(' ').map(str::to_owned).collect();
+        let keep = words.iter().rposition(|w| proper(w)).unwrap_or(words.len());
+        for i in 0..keep {
+            if self.width(&words.join(" "), px, w) <= max {
+                break;
+            }
+            if let Some(short) = abbreviate(&words[i]) {
+                words[i] = short;
+            }
+        }
+        self.fit(&words.join(" "), px, w, max)
+    }
+
     /// Cuts `s` to fit `max` pixels, with an ellipsis.
     pub fn fit(&self, s: &str, px: f32, w: Weight, max: f32) -> String {
         if self.width(s, px, w) <= max {
@@ -287,6 +329,27 @@ impl<F: Font> FontDyn for F {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn ship_names_shorten_like_the_game() {
+        let t = Text::new();
+        let (px, w) = (11.0, Weight::Regular);
+        let fits = |short: &str| t.width(short, px, w) + 0.5;
+        for (full, short) in [
+            ("Marcantonio Colonna", "M. Colonna"),
+            ("Almirante Cochrane", "Almte. Cochrane"),
+            ("Alberico da Barbiano", "A. da Barbiano"),
+            ("West Virginia '44", "W. Virginia '44"),
+            ("Prins van Oranje Golden", "P. van Oranje Golden"),
+            ("Admiral Graf Spee", "Adm. G. Spee"),
+            ("St. Vincent", "St. Vincent"),
+        ] {
+            assert_eq!(t.fit_name(full, px, w, fits(short)), short, "{full}");
+        }
+        // Nothing to shorten when it fits; one word at a time otherwise.
+        assert_eq!(t.fit_name("Marcantonio Colonna", px, w, 1000.0), "Marcantonio Colonna");
+        assert_eq!(t.fit_name("Admiral Graf Spee", px, w, fits("Adm. Graf Spee")), "Adm. Graf Spee");
+    }
+
     use super::*;
 
     fn ink(text: &mut Text, s: &str) -> usize {

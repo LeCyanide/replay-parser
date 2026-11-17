@@ -247,7 +247,7 @@ impl SidebarPainter {
         );
         let tx = x + 8.0 * u + g;
         let px = 11.0 * u;
-        let name = text.fit(&r.name, px, Weight::Regular, w - (tx - x) - 3.0 * u);
+        let name = text.fit_name(&r.name, px, Weight::Regular, w - (tx - x) - 3.0 * u);
         let color = if !r.alive {
             FG_FAINT
         } else if r.is_self {
@@ -303,7 +303,7 @@ impl SidebarPainter {
                 },
             );
             *cx += g + 3.0 * u;
-            let n = text.fit(&wh.name, px, Weight::Regular, max - g - 3.0 * u);
+            let n = text.fit_name(&wh.name, px, Weight::Regular, max - g - 3.0 * u);
             *cx += text.draw(pm, &n, *cx, y, px, Weight::Regular, Align::Left, side(wh.ally), a) + 5.0 * u;
         };
         match &e.kind {

@@ -354,15 +354,16 @@ impl MapLayer {
             Some(false) => ("Defeat", ENEMY),
             None => ("Draw", LABEL),
         };
-        let h = s * 0.2;
-        let y0 = (s - h) / 2.0;
+        // Near the bottom, so the end state of the battle stays visible.
+        let h = s * 0.15;
+        let y0 = s * 0.94 - h;
         rect(pm, 0.0, y0, s, h, [0x0d, 0x11, 0x17], 0.82);
         rect(pm, 0.0, y0, s, 2.0, color, 0.9);
         rect(pm, 0.0, y0 + h - 2.0, s, 2.0, color, 0.9);
-        let big = h * 0.36;
-        text.draw(pm, word, s / 2.0, y0 + h * 0.5, big, Weight::Bold, Align::Center, color, 1.0);
+        let big = s * 0.072;
+        text.draw(pm, word, s / 2.0, y0 + h * 0.56, big, Weight::Bold, Align::Center, color, 1.0);
         let score = format!("{}  :  {}", scores.0, scores.1);
-        text.draw(pm, &score, s / 2.0, y0 + h * 0.8, big * 0.45, Weight::Bold, Align::Center, LABEL, 0.9);
+        text.draw(pm, &score, s / 2.0, y0 + h * 0.86, big * 0.45, Weight::Bold, Align::Center, LABEL, 0.9);
     }
 }
 
@@ -405,7 +406,9 @@ fn place_labels(pm: &mut Pixmap, text: &mut Text, mut labels: Vec<NameLabel>, ma
     let pad = px * 0.15;
     let mut placed: Vec<Rect> = Vec::new();
     for l in labels {
-        let w = text.width(&l.text, px, Weight::Bold);
+        // Long ship names shortened as the game does ("M. Colonna").
+        let name = text.fit_name(&l.text, px, Weight::Bold, px * 9.0);
+        let w = text.width(&name, px, Weight::Bold);
         // Candidate baselines and left edges.
         let below = (l.x - w / 2.0, l.y + ship * 0.72 + cap);
         let candidates = [
@@ -429,8 +432,8 @@ fn place_labels(pm: &mut Pixmap, text: &mut Text, mut labels: Vec<NameLabel>, ma
         };
         placed.push(rect(at));
         // A dark halo keeps names readable over bright map areas.
-        text.draw(pm, &l.text, at.0 + 0.6, at.1 + 0.6, px, Weight::Bold, Align::Left, [0; 3], 0.6 * alpha);
-        text.draw(pm, &l.text, at.0, at.1, px, Weight::Bold, Align::Left, l.color, alpha);
+        text.draw(pm, &name, at.0 + 0.6, at.1 + 0.6, px, Weight::Bold, Align::Left, [0; 3], 0.6 * alpha);
+        text.draw(pm, &name, at.0, at.1, px, Weight::Bold, Align::Left, l.color, alpha);
     }
 }
 

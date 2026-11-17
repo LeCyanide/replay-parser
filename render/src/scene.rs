@@ -298,12 +298,13 @@ fn map_title(display: &str) -> String {
 
 fn subtitle(meta: &replay_parser::ReplayMeta, labels: &draw::Labels, world: &World) -> String {
     let mode = match meta.game_type.as_deref() {
-        Some("RandomBattle") => "Random battle".to_owned(),
-        Some("RankedBattle") => "Ranked battle".to_owned(),
-        Some("ClanBattle") => "Clan battle".to_owned(),
-        Some("CooperativeBattle") => "Co-op battle".to_owned(),
+        // Short, so the player and ship fit beside them.
+        Some("RandomBattle") => "Random".to_owned(),
+        Some("RankedBattle") => "Ranked".to_owned(),
+        Some("ClanBattle") => "Clan".to_owned(),
+        Some("CooperativeBattle") => "Co-op".to_owned(),
         Some("PVE") => "Operation".to_owned(),
-        Some("EventBattle") => "Event battle".to_owned(),
+        Some("EventBattle") => "Event".to_owned(),
         Some(other) => other.to_owned(),
         None => meta.scenario.clone(),
     };

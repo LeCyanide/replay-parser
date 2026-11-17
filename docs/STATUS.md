@@ -93,6 +93,9 @@ events).
 - A faded 1–10 / A–J grid by default (`--no-grid`, `grid: false` to leave
   it off); health bars in palette tones.
 - Sidebar: event times on the countdown clock, caps in label order.
+- Long ship names shortened as the game does when they don't fit
+  ("M. Colonna", "Almte. Cochrane"); short mode names in the subtitle; the
+  result banner slimmer and near the bottom of the map.
 
 ## Blocked here, needs a game install (🖥)
 
