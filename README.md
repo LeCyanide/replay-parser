@@ -34,9 +34,42 @@ Options: `--speed 32` (default; the video lasts the battle / 32, at most
 follows from it, error `too_large` if it cannot be met), `--fps 30`,
 `--width 1080 --height 720` (square map at full height, sidebar in the
 rest), `--progress json` (machine-readable progress and errors on stderr; see
-`bindings/node/README.md`), `-` for stdin/stdout, and `--frames <dir>
-[--every N]` to write PNG stills instead of a video, and `--no-grid` to leave
-the 1–10 / A–J grid off the map.
+`bindings/node/README.md`), `-` for stdin/stdout, `--frames <dir>
+[--every N]` to write PNG stills instead of a video, `--no-hold` to skip the
+held result frame, and `--no-grid` to leave the 1–10 / A–J grid off the map.
+
+### What the video shows
+
+The map (left, square):
+
+- the map image with a faded 10×10 grid (1–10 across, A–J down), as the
+  in-game minimap;
+- ships as class icons in the team colour (allies `#4CE8AA`, enemies
+  `#FE4D2A`), heading-rotated, with a fading trail; ships out of sight
+  faded, wrecks where they sank; the recording player's ship slightly
+  larger with a white ring;
+- a gold ring outside the icon on allies (and the recording player) while
+  the enemy spots them;
+- names in white, orange while the player is disconnected; placed so they
+  don't overlap; health bars above each ship (green, amber, red);
+- shell streaks in yellow, the front of each in the ammo's colour (AP
+  white, HE orange, SAP red); torpedoes as team-coloured dots;
+- planes as the game's minimap markers (`<data>/battle_hud/`; team-coloured
+  shapes per squadron type without them), fighter patrol circles;
+- radar, hydro and similar as tinted circles; smoke; capture points with
+  the capturing team's progress arc; weather, buffs and buildings;
+- on the held final frame, a Victory / Defeat / Draw banner with the score.
+
+The sidebar (right):
+
+- map, mode, team sizes, player and ship; the battle clock counting down;
+  the playback speed;
+- both scores against the win score, and each cap's owner and progress;
+- both lineups, sorted CV, BB, CA, DD, SS, with health; sunk ships struck
+  through, the recording player in bold;
+- battle events, newest at the bottom: kills with the game's kill-type icon
+  between killer and victim (the cause in words without the icons) and cap
+  changes, timed by the battle clock.
 
 The data directory:
 
@@ -44,18 +77,21 @@ The data directory:
 <data>/defs/<key>/            entity definitions (scripts/: entities.xml, entity_defs/) — required
 <data>/gameparams/<key>.json  GameParams extract and ship names — optional (without it: player names, cruiser marks)
 <data>/maps/maps.json         map images and sizes, in the suite's seed/maps format — optional (plain sea without)
-<data>/fonts/                fallback fonts for names Inter lacks (CJK, …) — optional
+<data>/fonts/                 fallback fonts for names Inter lacks (CJK, …) — optional
 <data>/battle_hud/            the client's gui/battle_hud/ plane markers and kill icons — optional (drawn shapes and words without)
 ```
 
-`<key>` is the replay's build number or its version (`15_10_0`). Both
-GameParams-derived files come from a game install:
+`<key>` is the replay's build number or its version (`15_10_0`). The
+definitions, the GameParams extract and the `battle_hud/` icons come from a
+game install:
 
 ```bash
 ./target/release/replay-dump datapack <game dir> <data dir> [build] [15_10_0]
 ```
 
 The suite's `seed/maps/` directory works as `<data>/maps` as it is.
+`scripts/build-data.sh` does both for a new game build. The
+data directory holds game files: keep it out of the repository.
 
 ## Scope: what the parser replaced in the suite
 
@@ -244,7 +280,9 @@ cargo build --release
 ./target/release/replay-dump entities <file.wowsreplay> <scripts dir>   # entity decode coverage
 ./target/release/replay-dump events   <file.wowsreplay> <scripts dir>   # one JSON line per entity event
 ./target/release/replay-dump world    <file.wowsreplay> <scripts dir>   # one world snapshot per game second
+./target/release/replay-dump draw     <file.wowsreplay> <game dir>      # one JSON line of draw commands per second
 ./target/release/replay-dump res      <game dir> [path]                 # list packaged files, or extract one
+./target/release/replay-dump datapack <game dir> <data dir> [build] [key]   # what wows-render needs, see above
 ```
 
 `<scripts dir>` can also be a game install directory (the one holding
@@ -308,7 +346,9 @@ The renderer (`render/tests/render.rs`) renders every fixture at a small
 size: the right frame count, a battle span over 5 minutes sped up to fit,
 frames that change over the battle, and a painted sidebar; it also loads a
 GameParams data pack in `replay-dump datapack`'s format and checks the
-`unsupported_version` error. The Node wrapper has its own tests
+`unsupported_version` error. These tests build their data directory with a
+symlink and so run on Linux and macOS only (CI runs them); the renderer's
+unit tests run everywhere. The Node wrapper has its own tests
 (`cd bindings/node && npm install && npm test`), run against a fake binary.
 
 The pickle reader is checked against CPython on `tests/pickle_corpus.json`
