@@ -60,9 +60,16 @@ events).
   tests with fetched fixtures and ffmpeg, the Node wrapper's tests, and a
   Docker build with a smoke render. Its steps pass locally; it has not run
   on GitHub yet.
+- **Death causes** in the event feed (torpedoed, burned, flooded, rammed,
+  bombed, secondaries, …): `replay_parser::constants`, with a default table
+  checked against the replays (every torpedo death follows a torpedo hit by
+  the killer, shell deaths follow shell hits) and each build's own table from
+  `battle.xml` via `datapack`.
+- **Ship names** on the map are placed to avoid each other, ship marks and
+  health bars.
 - **Tests**: `render/tests/render.rs` renders all 7 fixtures (frame count,
   battle span, frames change, sidebar painted), loads a data pack, and checks
-  the unsupported-version error, and encodes a short MP4. Workspace: 43 Rust
+  the unsupported-version error, and encodes a short MP4. Workspace: 45 Rust
   tests pass (including the encoder's ffprobe/ffmpeg checks), clippy clean.
 
 ## Blocked here, needs a game install (🖥)
@@ -93,9 +100,6 @@ events).
 - **Fonts**: Inter covers Latin, Cyrillic and Greek. CJK/Thai/Arabic player
   names render with gaps where glyphs are missing. A fallback font would add
   several MB; decide whether it is worth it.
-- **Death causes** in the event feed: every kill reads "sank". The death
-  reason codes are version-specific and not mapped yet (needs the game's
-  constants per version).
 - **Label overlap** on crowded maps: names are not de-collided.
 - **Sidebar density** for large battles (Operations, 12 v 12 plus bots): the
   lineup rows shrink to fit, events show only the newest that fit.

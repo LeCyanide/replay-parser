@@ -256,7 +256,17 @@ fn datapack(
             Some((k.clone(), catalog.get(&k)?.clone()))
         })
         .collect();
-    let json = serde_json::json!({ "build": res.build(), "gameparams": gp, "names": names });
+    // Death reasons by index, the build's own (the default table otherwise).
+    let death_reasons = res
+        .read("gui/data/constants/battle.xml")
+        .ok()
+        .and_then(|b| replay_parser::constants::death_reasons_from_xml(&String::from_utf8_lossy(&b)));
+    if death_reasons.is_none() {
+        eprintln!("warning: no DEATH_REASON_NAME table in gui/data/constants/battle.xml; the default is used");
+    }
+    let json = serde_json::json!({
+        "build": res.build(), "gameparams": gp, "names": names, "death_reasons": death_reasons,
+    });
     let gp_dir = out.join("gameparams");
     std::fs::create_dir_all(&gp_dir)?;
     let path = gp_dir.join(format!("{key}.json"));

@@ -21,6 +21,7 @@
 //! [`pickle`] reads the Python pickles found in `PYTHON` values and in
 //! GameParams.
 
+pub mod constants;
 pub mod container;
 pub mod defs;
 pub mod draw;

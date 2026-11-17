@@ -260,3 +260,89 @@ fn world_is_consistent_on_every_fixture() {
     }
     assert!(compared >= 3, "only {compared} consumable types compared across eras");
 }
+
+/// The default death-reason table against the replays' own evidence: a
+/// torpedo death follows a torpedo hit by the killer, a shell death a shell
+/// hit, in the two seconds before it.
+#[test]
+fn death_reasons_match_the_hits_before_them() {
+    use replay_parser::constants::death_reason;
+    let dir = root().join("replays");
+    let files: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .unwrap_or_else(|_| panic!("run scripts/fetch-fixtures.sh"))
+        .map(|e| e.unwrap().path())
+        .collect();
+    let (mut torpedo_deaths, mut shell_deaths) = (0, 0);
+    for path in files {
+        let replay = Replay::from_file(&path).unwrap();
+        let v = replay.meta.version().unwrap();
+        let defs =
+            EntityDefs::load(&ScriptDir(root().join("scripts").join(format!("{}_{}_{}", v.major, v.minor, v.patch))))
+                .unwrap();
+        let mut dec = EntityDecoder::new(&defs);
+        let (mut torpedo_shots, mut shell_shots) = (HashSet::new(), HashSet::new());
+        // (clock, owner, is torpedo)
+        let mut hits: Vec<(f32, i64, bool)> = Vec::new();
+        // (clock, killer, reason code)
+        let mut deaths: Vec<(f32, i64, i64)> = Vec::new();
+        fn list<'v, 'a>(v: Option<&'v Value<'a>>) -> &'v [Value<'a>] {
+            match v {
+                Some(Value::List(xs)) => xs,
+                _ => &[],
+            }
+        }
+        for p in Packets::new(&replay.packets, v) {
+            let Ok(Some(Event::Method { method, args, .. })) = dec.feed(&p) else { continue };
+            let arg = |i: usize| args.get(i).map(|(_, v)| v);
+            match method {
+                "receiveTorpedoes" | "receiveArtilleryShots" => {
+                    let (key, set) = if method == "receiveTorpedoes" {
+                        ("torpedoes", &mut torpedo_shots)
+                    } else {
+                        ("shots", &mut shell_shots)
+                    };
+                    for pack in list(arg(0)) {
+                        let owner = pack.get("ownerID").and_then(Value::as_i64).unwrap_or(0);
+                        for s in list(pack.get(key)) {
+                            set.insert((owner, s.get("shotID").and_then(Value::as_i64).unwrap_or(-1)));
+                        }
+                    }
+                }
+                "receiveShotKills" => {
+                    for pack in list(arg(0)) {
+                        let owner = pack.get("ownerID").and_then(Value::as_i64).unwrap_or(0);
+                        for k in list(pack.get("kills")) {
+                            let id = (owner, k.get("shotID").and_then(Value::as_i64).unwrap_or(-1));
+                            if torpedo_shots.contains(&id) || shell_shots.contains(&id) {
+                                hits.push((p.clock, owner, torpedo_shots.contains(&id)));
+                            }
+                        }
+                    }
+                }
+                "receiveVehicleDeath" => {
+                    let int = |i: usize| arg(i).and_then(Value::as_i64).unwrap_or(-1);
+                    deaths.push((p.clock, int(1), int(2)));
+                }
+                _ => {}
+            }
+        }
+        // The hit can arrive just after the death message.
+        let name = path.file_name().unwrap().to_string_lossy();
+        for (clock, killer, code) in deaths {
+            let reason = death_reason(code, None);
+            let last = hits.iter().rev().find(|h| h.1 == killer && h.0 >= clock - 2.0 && h.0 <= clock + 0.3);
+            match reason {
+                Some("TORPEDO" | "TBOMB") => {
+                    torpedo_deaths += 1;
+                    assert!(last.is_some_and(|h| h.2), "{name} @{clock}: {reason:?} without a torpedo hit");
+                }
+                Some("AP_SHELL" | "HE_SHELL" | "CS_SHELL") => {
+                    shell_deaths += 1;
+                    assert!(last.is_none_or(|h| !h.2), "{name} @{clock}: {reason:?} after a torpedo hit");
+                }
+                _ => {}
+            }
+        }
+    }
+    assert!(torpedo_deaths >= 20 && shell_deaths >= 60, "{torpedo_deaths} torpedo, {shell_deaths} shell deaths");
+}

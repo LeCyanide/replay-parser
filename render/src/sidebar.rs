@@ -41,12 +41,11 @@ pub enum EventKind {
     Kill {
         killer: Option<Who>,
         victim: Who,
+        /// As the feed shows it: "sank", "torpedoed", "burned", …
+        verb: &'static str,
     },
     /// A cap changed hands; `owner` None when neutralised.
-    Cap {
-        label: String,
-        owner: Option<bool>,
-    },
+    Cap { label: String, owner: Option<bool> },
 }
 
 pub struct Event {
@@ -287,13 +286,13 @@ impl SidebarPainter {
             *cx += text.draw(pm, &n, *cx, y, px, Weight::Regular, Align::Left, side(wh.ally), a) + 5.0 * u;
         };
         match &e.kind {
-            EventKind::Kill { killer, victim } => {
-                let verb_w = text.width("sank", px, Weight::Regular) + 5.0 * u;
+            EventKind::Kill { killer, victim, verb } => {
+                let verb_w = text.width(verb, px, Weight::Regular) + 5.0 * u;
                 let half = (end - cx - verb_w) / 2.0;
                 match killer {
                     Some(k) => {
                         who(pm, text, &mut cx, k, half);
-                        cx += text.draw(pm, "sank", cx, y, px, Weight::Regular, Align::Left, FG_DIM, a) + 5.0 * u;
+                        cx += text.draw(pm, verb, cx, y, px, Weight::Regular, Align::Left, FG_DIM, a) + 5.0 * u;
                     }
                     None => {
                         cx += text.draw(pm, "Sunk:", cx, y, px, Weight::Regular, Align::Left, FG_DIM, a) + 5.0 * u;
@@ -326,5 +325,22 @@ impl SidebarPainter {
                 text.draw(pm, msg, cx, y, px, Weight::Regular, Align::Left, c, a);
             }
         }
+    }
+}
+
+/// The feed's verb for a death reason constant (`replay_parser::constants`).
+pub fn kill_verb(reason: Option<&str>) -> &'static str {
+    match reason {
+        Some("TORPEDO" | "TBOMB") => "torpedoed",
+        Some("BURNING") => "burned",
+        Some("FLOOD") => "flooded",
+        Some("RAM") => "rammed",
+        Some("BOMB" | "SKIP_BOMB") => "bombed",
+        Some("ROCKET") => "rocketed",
+        Some("DBOMB" | "ADBOMB") => "depth-charged",
+        Some("DETONATE") => "detonated",
+        Some("SEA_MINE") => "mined",
+        Some("ATBA") => "sank (secondaries)",
+        _ => "sank",
     }
 }

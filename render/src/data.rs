@@ -37,6 +37,9 @@ pub struct GameData {
     pub gameparams: GameParams,
     /// Catalogue entries the labels use: `IDS_<ship index>` and bot names.
     pub names: HashMap<String, String>,
+    /// The build's `DEATH_REASON_NAME` constants by index, if extracted.
+    #[serde(default)]
+    pub death_reasons: Option<Vec<String>>,
 }
 
 /// A map in the suite's `maps.json`.

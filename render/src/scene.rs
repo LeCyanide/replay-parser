@@ -100,6 +100,7 @@ pub fn render(
         ));
     }
     let gp = game.as_ref().map(|g| &g.gameparams);
+    let death_reasons = game.as_ref().and_then(|g| g.death_reasons.as_deref());
     let empty = HashMap::new();
     let names = game.as_ref().map_or(&empty, |g| &g.names);
     let map = data.map(&meta.map_name)?;
@@ -228,7 +229,17 @@ pub fn render(
             frame.draw_pixmap(0, 0, layer.background.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
             layer.paint(frame, &mut text, &cmds, world);
             track_caps(world, t - span.start, caps_seen, cap_events);
-            let sb = sidebar(world, &labels, &cmds, cap_events, span.start, speed, title.clone(), subtitle.clone());
+            let sb = sidebar(
+                world,
+                &labels,
+                &cmds,
+                cap_events,
+                span.start,
+                speed,
+                title.clone(),
+                subtitle.clone(),
+                death_reasons,
+            );
             painter.paint(frame, &mut text, &sb, map_px as f32, side_w, h as f32);
         };
     for p in Packets::new(&replay.packets, version) {
@@ -328,6 +339,7 @@ fn sidebar(
     speed: f32,
     title: String,
     subtitle: String,
+    death_reasons: Option<&[String]>,
 ) -> Sidebar {
     let own = world.own_team();
     let ship_of: HashMap<usize, (u32, &replay_parser::world::Ship)> =
@@ -381,6 +393,7 @@ fn sidebar(
                 kind: EventKind::Kill {
                     killer: (d.killer != 0 && d.killer != d.victim).then(|| who(d.killer)).flatten(),
                     victim: who(d.victim)?,
+                    verb: kill_verb(replay_parser::constants::death_reason(d.reason, death_reasons)),
                 },
             })
         })
