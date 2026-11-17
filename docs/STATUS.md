@@ -68,11 +68,16 @@ events).
 - **Map extras**: fading 40 s trails behind ships in sight, a ring around
   the recording player's ship, and a Victory/Defeat/Draw banner with the
   final score on the held last frame.
+- **Fallback fonts**: fonts in `<data>/fonts/` fill in characters Inter
+  lacks (CJK, Thai, …), loaded at run time so the binary stays small;
+  without one such names show gaps.
+- **Deterministic output**: the same replay and options give the same MP4
+  bytes (tested).
 - **Ship names** on the map are placed to avoid each other, ship marks and
   health bars.
 - **Tests**: `render/tests/render.rs` renders all 7 fixtures (frame count,
   battle span, frames change, sidebar painted), loads a data pack, and checks
-  the unsupported-version error, and encodes a short MP4. Workspace: 45 Rust
+  the unsupported-version error, and encodes a short MP4. Workspace: 48 Rust
   tests pass (including the encoder's ffprobe/ffmpeg checks), clippy clean.
 
 ## Blocked here, needs a game install (🖥)
@@ -100,9 +105,6 @@ events).
 - **Patch cadence**: each game patch needs a new datapack before the bot can
   render its replays. Consider falling back to the nearest older definitions
   only if decode failures stay near zero (not implemented: today it refuses).
-- **Fonts**: Inter covers Latin, Cyrillic and Greek. CJK/Thai/Arabic player
-  names render with gaps where glyphs are missing. A fallback font would add
-  several MB; decide whether it is worth it.
 - **Label overlap** on crowded maps: names are not de-collided.
 - **Sidebar density** for large battles (Operations, 12 v 12 plus bots): the
   lineup rows shrink to fit, events show only the newest that fit.

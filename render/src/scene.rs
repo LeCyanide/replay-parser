@@ -191,6 +191,11 @@ pub fn render(
     let mut layer = MapLayer::new(map_px, map.as_ref().map(|m| m.png.as_slice()));
     let painter = SidebarPainter::default();
     let mut text = Text::new();
+    for (path, bytes) in data.fonts() {
+        if !text.add_fallback(bytes) {
+            warnings.push(format!("{}: not a font this renderer can read; skipped", path.display()));
+        }
+    }
     let fps = opts.fps as f32;
     let battle = span.end - span.start;
     let hold = if opts.hold_end { (fps * HOLD_SECONDS) as u32 } else { 0 };

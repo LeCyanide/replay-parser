@@ -43,6 +43,7 @@ The data directory:
 <data>/defs/<key>/            entity definitions (scripts/: entities.xml, entity_defs/) — required
 <data>/gameparams/<key>.json  GameParams extract and ship names — optional (without it: player names, cruiser marks)
 <data>/maps/maps.json         map images and sizes, in the suite's seed/maps format — optional (plain grid without)
+<data>/fonts/                fallback fonts for names Inter lacks (CJK, …) — optional
 ```
 
 `<key>` is the replay's build number or its version (`15_10_0`). Both

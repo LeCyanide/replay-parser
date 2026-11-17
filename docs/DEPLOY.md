@@ -39,7 +39,13 @@ One per host, shared by every render (mount it read-only):
 data/defs/<key>/            entity definitions per game version (required)
 data/gameparams/<key>.json  ship names and classes (optional but expected)
 data/maps/                  map images (optional; a plain grid without)
+data/fonts/                 fallback fonts (optional; .ttf/.otf/.ttc)
 ```
+
+The built-in font (Inter) covers Latin, Cyrillic and Greek. For CJK and
+other player names, put a font that covers them in `data/fonts/`, e.g. Noto
+Sans CJK (`fonts-noto-cjk` on Debian, SIL OFL); without one those characters
+show as gaps. Fonts are tried in file-name order.
 
 Build or update it on a machine with the game installed, after every game
 patch:

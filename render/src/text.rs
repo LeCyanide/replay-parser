@@ -5,6 +5,7 @@ use std::collections::HashMap;
 
 use ab_glyph::Font;
 use ab_glyph::FontRef;
+use ab_glyph::FontVec;
 use ab_glyph::GlyphId;
 use ab_glyph::OutlineCurve;
 use ab_glyph::VariableFont;
@@ -53,11 +54,28 @@ pub enum Align {
     Right,
 }
 
+/// Which font a glyph comes from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum Face {
+    Inter(Weight),
+    /// Index into [`Text::fallbacks`].
+    Fallback(usize),
+}
+
+/// One laid-out character: a glyph at a pen position, or the base flag.
+enum Piece {
+    Glyph { face: Face, id: GlyphId, x: f32 },
+    Flag { x: f32 },
+}
+
 pub struct Text {
     regular: FontRef<'static>,
     bold: FontRef<'static>,
+    /// Fonts for characters Inter lacks (CJK names, …), in order; loaded at
+    /// run time so the binary does not carry them.
+    fallbacks: Vec<FontVec>,
     /// Glyph outlines in font units (y up), built once.
-    paths: HashMap<(Weight, GlyphId), Option<Path>>,
+    paths: HashMap<(Face, GlyphId), Option<Path>>,
 }
 
 impl Default for Text {
@@ -73,40 +91,78 @@ impl Text {
             f.set_variation(b"wght", w);
             f
         };
-        Self { regular: font(400.0), bold: font(650.0), paths: HashMap::new() }
+        Self { regular: font(400.0), bold: font(650.0), fallbacks: Vec::new(), paths: HashMap::new() }
     }
 
-    fn font(&self, w: Weight) -> &FontRef<'static> {
-        match w {
-            Weight::Regular => &self.regular,
-            Weight::Bold => &self.bold,
+    /// Adds a fallback font (TrueType/OpenType, or the first face of a
+    /// collection). Returns false if it does not parse.
+    pub fn add_fallback(&mut self, bytes: Vec<u8>) -> bool {
+        match FontVec::try_from_vec_and_index(bytes, 0) {
+            Ok(f) => {
+                self.fallbacks.push(f);
+                true
+            }
+            Err(_) => false,
         }
     }
 
-    fn scale(&self, w: Weight, px: f32) -> f32 {
-        px / self.font(w).units_per_em().unwrap_or(1000.0)
+    fn with_face<R>(&self, face: Face, f: impl FnOnce(&dyn FontDyn) -> R) -> R {
+        match face {
+            Face::Inter(Weight::Regular) => f(&self.regular),
+            Face::Inter(Weight::Bold) => f(&self.bold),
+            Face::Fallback(i) => f(&self.fallbacks[i]),
+        }
+    }
+
+    /// The face that has `c`: Inter, else the first fallback with it, else
+    /// Inter (whose missing glyph is skipped when drawing).
+    fn face_for(&self, c: char, w: Weight) -> (Face, GlyphId) {
+        let inter = if w == Weight::Bold { &self.bold } else { &self.regular };
+        let g = inter.glyph_id(c);
+        if g.0 != 0 || c.is_whitespace() {
+            return (Face::Inter(w), g);
+        }
+        for (i, f) in self.fallbacks.iter().enumerate() {
+            let fg = f.glyph_id(c);
+            if fg.0 != 0 {
+                return (Face::Fallback(i), fg);
+            }
+        }
+        (Face::Inter(w), g)
+    }
+
+    /// Pen positions from 0 and the total advance, at `px`.
+    fn layout(&self, s: &str, px: f32, w: Weight) -> (Vec<Piece>, f32) {
+        let mut out = Vec::with_capacity(s.len());
+        let mut pen = 0.0;
+        let mut prev: Option<(Face, GlyphId)> = None;
+        for c in s.chars() {
+            if c == FLAG {
+                out.push(Piece::Flag { x: pen });
+                pen += px * FLAG_ADVANCE;
+                prev = None;
+                continue;
+            }
+            let (face, id) = self.face_for(c, w);
+            let (kern, advance) = self.with_face(face, |f| {
+                let k = px / f.upem();
+                let kern = match prev {
+                    Some((pf, pg)) if pf == face => f.kern(pg, id) * k,
+                    _ => 0.0,
+                };
+                (kern, f.advance(id) * k)
+            });
+            pen += kern;
+            out.push(Piece::Glyph { face, id, x: pen });
+            pen += advance;
+            prev = Some((face, id));
+        }
+        (out, pen)
     }
 
     /// Advance width of `s` at `px`.
     pub fn width(&self, s: &str, px: f32, w: Weight) -> f32 {
-        let f = self.font(w);
-        let k = self.scale(w, px);
-        let mut x = 0.0;
-        let mut prev: Option<GlyphId> = None;
-        for c in s.chars() {
-            if c == FLAG {
-                x += px * FLAG_ADVANCE / k;
-                prev = None;
-                continue;
-            }
-            let g = f.glyph_id(c);
-            if let Some(p) = prev {
-                x += f.kern_unscaled(p, g);
-            }
-            x += f.h_advance_unscaled(g);
-            prev = Some(g);
-        }
-        x * k
+        self.layout(s, px, w).1
     }
 
     /// Cuts `s` to fit `max` pixels, with an ellipsis.
@@ -125,39 +181,12 @@ impl Text {
         String::new()
     }
 
-    fn glyph_path(&mut self, w: Weight, g: GlyphId) -> Option<&Path> {
-        let font = self.font(w).clone();
-        self.paths
-            .entry((w, g))
-            .or_insert_with(|| {
-                let outline = font.outline(g)?;
-                let mut pb = PathBuilder::new();
-                let mut last: Option<(f32, f32)> = None;
-                for c in &outline.curves {
-                    let (start, end) = match c {
-                        OutlineCurve::Line(a, b) => (*a, *b),
-                        OutlineCurve::Quad(a, _, b) => (*a, *b),
-                        OutlineCurve::Cubic(a, _, _, b) => (*a, *b),
-                    };
-                    if last != Some((start.x, start.y)) {
-                        if last.is_some() {
-                            pb.close();
-                        }
-                        pb.move_to(start.x, start.y);
-                    }
-                    match c {
-                        OutlineCurve::Line(_, b) => pb.line_to(b.x, b.y),
-                        OutlineCurve::Quad(_, c1, b) => pb.quad_to(c1.x, c1.y, b.x, b.y),
-                        OutlineCurve::Cubic(_, c1, c2, b) => pb.cubic_to(c1.x, c1.y, c2.x, c2.y, b.x, b.y),
-                    }
-                    last = Some((end.x, end.y));
-                }
-                if last.is_some() {
-                    pb.close();
-                }
-                pb.finish()
-            })
-            .as_ref()
+    fn glyph_path(&mut self, face: Face, g: GlyphId) -> Option<&Path> {
+        if !self.paths.contains_key(&(face, g)) {
+            let path = self.with_face(face, |f| f.outline_path(g));
+            self.paths.insert((face, g), path);
+        }
+        self.paths.get(&(face, g)).and_then(Option::as_ref)
     }
 
     /// Draws `s` with its baseline at `y`, aligned on `x`. Returns the width.
@@ -174,41 +203,27 @@ impl Text {
         color: [u8; 3],
         alpha: f32,
     ) -> f32 {
-        let width = self.width(s, px, w);
-        let mut pen = match align {
+        let (pieces, width) = self.layout(s, px, w);
+        let x0 = match align {
             Align::Left => x,
             Align::Center => x - width / 2.0,
             Align::Right => x - width,
         };
-        let k = self.scale(w, px);
         let mut paint = Paint::default();
         paint.set_color_rgba8(color[0], color[1], color[2], (alpha.clamp(0.0, 1.0) * 255.0) as u8);
-        let font = self.font(w).clone();
-        let mut prev: Option<GlyphId> = None;
-        for c in s.chars() {
-            if c == FLAG {
-                flag(pm, pen, y, px, &paint);
-                pen += px * FLAG_ADVANCE;
-                prev = None;
-                continue;
+        for piece in pieces {
+            match piece {
+                Piece::Flag { x } => flag(pm, x0 + x, y, px, &paint),
+                // No glyph anywhere: leave a gap rather than a box.
+                Piece::Glyph { id, .. } if id.0 == 0 => {}
+                Piece::Glyph { face, id, x } => {
+                    let k = self.with_face(face, |f| px / f.upem());
+                    if let Some(path) = self.glyph_path(face, id) {
+                        let t = Transform::from_row(k, 0.0, 0.0, -k, x0 + x, y);
+                        pm.fill_path(path, &paint, FillRule::Winding, t, None);
+                    }
+                }
             }
-            let g = font.glyph_id(c);
-            if let Some(p) = prev {
-                pen += font.kern_unscaled(p, g) * k;
-            }
-            // No glyph in the font (CJK names, symbols): leave a gap rather
-            // than a box.
-            if g.0 == 0 {
-                pen += font.h_advance_unscaled(g) * k;
-                prev = None;
-                continue;
-            }
-            if let Some(path) = self.glyph_path(w, g) {
-                let t = Transform::from_row(k, 0.0, 0.0, -k, pen, y);
-                pm.fill_path(path, &paint, FillRule::Winding, t, None);
-            }
-            pen += font.h_advance_unscaled(g) * k;
-            prev = Some(g);
         }
         width
     }
@@ -216,5 +231,90 @@ impl Text {
     /// Height above the baseline of a capital letter, for centring.
     pub fn cap_height(&self, px: f32) -> f32 {
         px * 0.727
+    }
+}
+
+/// What layout needs from a font, object-safe over `FontRef` and `FontVec`.
+trait FontDyn {
+    fn upem(&self) -> f32;
+    fn kern(&self, a: GlyphId, b: GlyphId) -> f32;
+    fn advance(&self, g: GlyphId) -> f32;
+    fn outline_path(&self, g: GlyphId) -> Option<Path>;
+}
+
+impl<F: Font> FontDyn for F {
+    fn upem(&self) -> f32 {
+        self.units_per_em().unwrap_or(1000.0)
+    }
+
+    fn kern(&self, a: GlyphId, b: GlyphId) -> f32 {
+        self.kern_unscaled(a, b)
+    }
+
+    fn advance(&self, g: GlyphId) -> f32 {
+        self.h_advance_unscaled(g)
+    }
+
+    fn outline_path(&self, g: GlyphId) -> Option<Path> {
+        let outline = self.outline(g)?;
+        let mut pb = PathBuilder::new();
+        let mut last: Option<(f32, f32)> = None;
+        for c in &outline.curves {
+            let (start, end) = match c {
+                OutlineCurve::Line(a, b) => (*a, *b),
+                OutlineCurve::Quad(a, _, b) => (*a, *b),
+                OutlineCurve::Cubic(a, _, _, b) => (*a, *b),
+            };
+            if last != Some((start.x, start.y)) {
+                if last.is_some() {
+                    pb.close();
+                }
+                pb.move_to(start.x, start.y);
+            }
+            match c {
+                OutlineCurve::Line(_, b) => pb.line_to(b.x, b.y),
+                OutlineCurve::Quad(_, c1, b) => pb.quad_to(c1.x, c1.y, b.x, b.y),
+                OutlineCurve::Cubic(_, c1, c2, b) => pb.cubic_to(c1.x, c1.y, c2.x, c2.y, b.x, b.y),
+            }
+            last = Some((end.x, end.y));
+        }
+        if last.is_some() {
+            pb.close();
+        }
+        pb.finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ink(text: &mut Text, s: &str) -> usize {
+        let mut pm = Pixmap::new(200, 40).unwrap();
+        text.draw(&mut pm, s, 4.0, 30.0, 20.0, Weight::Regular, Align::Left, [255; 3], 1.0);
+        pm.pixels().iter().filter(|p| p.alpha() > 0).count()
+    }
+
+    #[test]
+    fn latin_draws_and_missing_glyphs_leave_gaps() {
+        let mut t = Text::new();
+        assert!(ink(&mut t, "Wichita") > 50);
+        // No CJK in Inter: nothing drawn, but the text still has a width.
+        assert_eq!(ink(&mut t, "大和"), 0);
+        assert!(t.width("大和", 20.0, Weight::Regular) > 0.0);
+    }
+
+    #[test]
+    fn fallback_fonts_fill_in() {
+        // Any CJK font the test machine has; skipped without one.
+        let candidates =
+            ["/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf", "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"];
+        let Some(bytes) = candidates.iter().find_map(|p| std::fs::read(p).ok()) else { return };
+        let mut t = Text::new();
+        assert!(!t.add_fallback(b"not a font".to_vec()));
+        assert!(t.add_fallback(bytes));
+        assert!(ink(&mut t, "大和") > 50);
+        // Latin still comes from Inter: same ink as without fallbacks.
+        assert_eq!(ink(&mut t, "Wichita"), ink(&mut Text::new(), "Wichita"));
     }
 }

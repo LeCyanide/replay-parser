@@ -49,7 +49,8 @@ pub struct MapLayer {
     pub background: Pixmap,
     pub size: u32,
     glyphs: Glyphs,
-    trails: std::collections::HashMap<u32, Trail>,
+    // Ordered, so overlapping trails blend the same way every run.
+    trails: std::collections::BTreeMap<u32, Trail>,
 }
 
 impl MapLayer {
@@ -73,7 +74,7 @@ impl MapLayer {
                 }
             }
         }
-        Self { background: bg, size, glyphs: Glyphs::default(), trails: std::collections::HashMap::new() }
+        Self { background: bg, size, glyphs: Glyphs::default(), trails: std::collections::BTreeMap::new() }
     }
 
     /// Paints `cmds` onto `pm` (which already holds the background at

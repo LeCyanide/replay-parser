@@ -5,6 +5,7 @@
 //! <data>/gameparams/<key>.json  optional: extracted GameParams + ship names (`replay-dump datapack`)
 //! <data>/maps/maps.json         map images and sizes, in the suite's seed format
 //! <data>/maps/<file>            the images it names
+//! <data>/fonts/*.ttf|otf|ttc    optional fallback fonts for names Inter cannot show (CJK, …)
 //! ```
 //!
 //! `<key>` is the replay's build number (`13533378`) or, failing that, its
@@ -104,6 +105,21 @@ impl DataDir {
             }
         }
         Ok(None)
+    }
+
+    /// Fallback fonts, by file name: `(path, bytes)`.
+    pub fn fonts(&self) -> Vec<(PathBuf, Vec<u8>)> {
+        let Ok(dir) = std::fs::read_dir(self.root.join("fonts")) else { return Vec::new() };
+        let mut paths: Vec<PathBuf> = dir
+            .filter_map(|e| Some(e.ok()?.path()))
+            .filter(|p| {
+                p.extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| matches!(e.to_ascii_lowercase().as_str(), "ttf" | "otf" | "ttc"))
+            })
+            .collect();
+        paths.sort();
+        paths.into_iter().filter_map(|p| Some((p.clone(), std::fs::read(&p).ok()?))).collect()
     }
 
     /// The map image and its space size, by `spaces/<name>`.

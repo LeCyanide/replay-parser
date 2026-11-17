@@ -180,3 +180,14 @@ fn stays_under_the_size_limit() {
     let err = replay_render::render_mp4(&fixture("Utrecht"), &data, &tiny, &mut |_| {}).err().expect("too small");
     assert_eq!(err.code(), "too_large");
 }
+
+#[test]
+fn output_is_deterministic() {
+    // Same replay, same options: the same bytes (so renders can be cached
+    // and compared).
+    let data = DataDir::new(data_dir("det"));
+    let opts = RenderOptions { width: 720, height: 480, fps: 10, ..RenderOptions::default() };
+    let a = replay_render::render_mp4(&fixture("Valparaiso"), &data, &opts, &mut |_| {}).unwrap().0;
+    let b = replay_render::render_mp4(&fixture("Valparaiso"), &data, &opts, &mut |_| {}).unwrap().0;
+    assert!(a == b, "two renders differ");
+}
