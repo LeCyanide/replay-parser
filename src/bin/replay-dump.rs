@@ -223,8 +223,6 @@ fn run(cmd: &str, path: &std::path::Path, scripts: Option<&std::path::Path>) -> 
     Ok(())
 }
 
-/// Entity defs from a loose `scripts/` directory, or from a game install
-/// (a directory with `bin/`), using the build that recorded the replay.
 /// Entity definitions and a GameParams extract for one build; see the
 /// module docs.
 fn datapack(
@@ -275,6 +273,8 @@ fn datapack(
     Ok(())
 }
 
+/// Entity defs from a loose `scripts/` directory, or from a game install
+/// (a directory with `bin/`), using the build that recorded the replay.
 fn load_defs(dir: &std::path::Path, version: replay_parser::Version) -> Result<EntityDefs, Box<dyn std::error::Error>> {
     if dir.join("bin").is_dir() {
         let res = replay_parser::res::Resources::open_build(dir, version.build)

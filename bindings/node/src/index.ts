@@ -409,7 +409,8 @@ export async function supportedVersions(dataDir: string): Promise<string[]> {
   // holds entities.xml.
   const usable = await Promise.all(
     entries
-      .filter((d) => /^\d+(_\d+)*$/.test(d.name))
+      // Version keys only (15_9_0); a build-number key serves one build.
+      .filter((d) => /^\d+(_\d+)+$/.test(d.name))
       .map(async (d) => {
         try {
           return (await stat(`${root}/${d.name}/entities.xml`)).isFile() ? d.name : null;

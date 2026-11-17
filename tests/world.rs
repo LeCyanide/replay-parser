@@ -272,7 +272,7 @@ fn death_reasons_match_the_hits_before_them() {
         .unwrap_or_else(|_| panic!("run scripts/fetch-fixtures.sh"))
         .map(|e| e.unwrap().path())
         .collect();
-    let (mut torpedo_deaths, mut shell_deaths) = (0, 0);
+    let (mut torpedo_deaths, mut shell_deaths, mut shell_without_hit) = (0, 0, 0);
     for path in files {
         let replay = Replay::from_file(&path).unwrap();
         let v = replay.meta.version().unwrap();
@@ -336,14 +336,20 @@ fn death_reasons_match_the_hits_before_them() {
                     torpedo_deaths += 1;
                     assert!(last.is_some_and(|h| h.2), "{name} @{clock}: {reason:?} without a torpedo hit");
                 }
-                Some("AP_SHELL" | "HE_SHELL" | "CS_SHELL") => {
+                Some("ATBA" | "AP_SHELL" | "HE_SHELL" | "CS_SHELL") => {
                     shell_deaths += 1;
                     assert!(last.is_none_or(|h| !h.2), "{name} @{clock}: {reason:?} after a torpedo hit");
+                    // The recorder does not see every hit, so a few lack one.
+                    shell_without_hit += usize::from(last.is_none());
                 }
                 _ => {}
             }
         }
     }
-    eprintln!("checked {torpedo_deaths} torpedo and {shell_deaths} shell deaths");
+    eprintln!("checked {torpedo_deaths} torpedo and {shell_deaths} shell deaths ({shell_without_hit} without a hit)");
+    assert!(
+        shell_without_hit * 20 <= shell_deaths,
+        "{shell_without_hit} of {shell_deaths} shell deaths without a shell hit"
+    );
     assert!(torpedo_deaths >= 20 && shell_deaths >= 60, "{torpedo_deaths} torpedo, {shell_deaths} shell deaths");
 }

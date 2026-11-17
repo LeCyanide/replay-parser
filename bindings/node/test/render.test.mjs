@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -259,13 +259,14 @@ test("supportedVersions lists usable defs/ subdirectories, sorted numerically", 
       await mkdir(join(dir, "defs", v), { recursive: true });
       await writeFile(join(dir, "defs", v, "entities.xml"), "<root/>");
     }
-    // A build-number key that is a symlink to a version directory counts.
-    await symlink(join(dir, "defs", "15_9_0"), join(dir, "defs", "13533378"));
+    // A build-number key is not a version.
+    await mkdir(join(dir, "defs", "13533378"));
+    await writeFile(join(dir, "defs", "13533378", "entities.xml"), "<root/>");
     // No entities.xml: the renderer would not use it either.
     await mkdir(join(dir, "defs", "15_11_0"));
     await writeFile(join(dir, "defs", "README.txt"), "x");
     await mkdir(join(dir, "maps"));
-    const want = ["14_11_1", "15_9_0", "15_10_0", "13533378"];
+    const want = ["14_11_1", "15_9_0", "15_10_0"];
     assert.deepEqual(await supportedVersions(dir), want);
     assert.deepEqual(await supportedVersions(dir + "/"), want);
   } finally {
