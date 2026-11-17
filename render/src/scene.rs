@@ -232,7 +232,7 @@ pub fn render(
     let mut cap_events: Vec<Event> = Vec::new();
     let mut frame = Pixmap::new(w, h).ok_or_else(|| RenderError::Internal("bad frame size".into()))?;
     let mut k = 0u32;
-    let title = map_title(&meta.map_display_name);
+    let title = map.as_ref().map_or_else(|| map_title(&meta.map_display_name), |m| m.name.clone());
     let subtitle = subtitle(meta, &labels, &world);
     let mut paint_frame =
         |world: &World, t: f32, frame: &mut Pixmap, cap_events: &mut Vec<Event>, caps_seen: &mut BTreeMap<u32, i64>| {
@@ -290,7 +290,7 @@ pub fn render(
     Ok(Summary { frames: k, warnings, battle_seconds: battle, speed })
 }
 
-/// `42_Neighbors` → `Neighbors`.
+/// `42_Neighbors` → `Neighbors`, for maps `maps.json` doesn't name.
 fn map_title(display: &str) -> String {
     let s = display.trim_start_matches(|c: char| c.is_ascii_digit()).trim_start_matches('_');
     s.replace('_', " ")

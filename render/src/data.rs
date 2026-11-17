@@ -65,6 +65,8 @@ pub struct MapImage {
     pub png: Vec<u8>,
     /// Side of the playable square in world units, if `maps.json` gives it.
     pub space_size: Option<i32>,
+    /// The map's in-game name ("Mountain Range" for `58_RidgeNew`).
+    pub name: String,
 }
 
 /// The game's own minimap plane markers and kill-type icons. Empty when the
@@ -165,7 +167,7 @@ impl DataDir {
         })?;
         let png =
             std::fs::read(&img).map_err(|e| DataError::Bad { path: img.display().to_string(), msg: e.to_string() })?;
-        Ok(Some(MapImage { png, space_size: m.space_size }))
+        Ok(Some(MapImage { png, space_size: m.space_size, name: m.name.clone() }))
     }
 }
 
