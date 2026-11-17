@@ -176,12 +176,14 @@ fn installed_builds_decode_their_replays() {
             }
             for (i, pl) in world.players.iter().enumerate() {
                 let n = world.ships.values().filter(|s| s.player == Some(i)).count();
-                // Allies are always in view; an enemy the recording player
-                // never saw (one 15.9 tournament replay saw none) has no ship.
-                // In PvE an arena-info bot is a template that can spawn several
-                // ships, or none yet; only the recording player is fixed.
+                // A player whose ship never came near the recording player has
+                // no ship entity: enemies never seen (one 15.9 tournament
+                // replay saw none), and allies too (a 15.10 Random battle had
+                // four, drawn from the minimap instead). In PvE an arena-info
+                // bot is a template that can spawn several ships, or none yet;
+                // only the recording player is fixed.
                 let want = match (pve, pl.relation) {
-                    (_, 0) | (false, 1) => 1..=1,
+                    (_, 0) => 1..=1,
                     (false, _) => 0..=1,
                     (true, _) => 0..=usize::MAX,
                 };

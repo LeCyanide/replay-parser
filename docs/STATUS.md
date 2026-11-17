@@ -98,28 +98,28 @@ events).
   result banner slimmer and near the top of the map; Black and Golden
   variants as "B" and "G".
 
-## Blocked here, needs a game install (🖥)
+## Done: first run against a real install (2026-11-17)
 
-1. **15.10 entity definitions.** The public source (Monstrofil/replays_unpack,
-   pinned and latest as of 2026-11-06) stops at 15.9, and 15.9's definitions
-   do not fit 15.10: on the supplied Wichita replay (15.10.0, build 13533378)
-   23,128 of 72,447 entity packets fail (new Avatar and Vehicle methods and
-   properties shift the indices). `wows-render` therefore refuses it with
-   `unsupported_version`. The Cleveland replay supplied as 15.9 is also
-   15.10.0, build 13533378, by its own metadata (12,678 of 46,871 fail). Fix: on a machine with the game,
-   `replay-dump datapack <game dir> <data dir> 13533378 15_10_0`, then render
-   the Wichita replay and check it.
-2. **GameParams extract.** Same command; without it ships show player names
-   and cruiser marks. Not run here: the datapack command is untested against
-   a real install (its output format is tested via a hand-made pack).
-3. **Run the install tests** (`WOWS_DIR=… cargo test --release -- --ignored`)
-   after this round's parser changes.
+- `replay-dump datapack <live install> <dir> 13533378` built the 15.10 pack
+  in about 3 s: 39 definition files, 1246 ships, 106 `battle_hud` icons.
+  A 15.10 Random battle (the earlier blocker: 15.9 definitions failed a
+  third of 15.10's entity packets) and a second one rendered cleanly with
+  it. Keys are the build number by default; `[key]` names it `15_10_0`.
+- The map title is the suite's name for the map (`maps.json` `name`, e.g.
+  "Mountain Range" for `58_RidgeNew`), not the replay's internal key.
+- Install tests (`WOWS_DIR=… cargo test --release --test install --
+  --ignored`) on the live install's own archive pass: 242 replays (15.9
+  and 15.10) decoded against their build; radar 0.972 of enemies inside
+  spotted, 0.651 just outside; own ship drawn in every frame.
+  They found that allies, not only enemies, can have no ship entity all
+  battle (four in one 15.10 Random battle; the renderer draws them from the
+  minimap). The test's assumption was relaxed; no parser change.
 
 ## Open tasks (not started or partial)
 
-- **Data refresh per patch**: `scripts/build-data.sh` must be run on a
-  machine with the game after each patch; it is untested against a real
-  install (as is `datapack`).
+- **Data refresh per patch**: `scripts/build-data.sh` (or `datapack`) must
+  be run on a machine with the game after each patch. `datapack` has run on
+  a real install; `build-data.sh` (bash) has not.
 - **Patch cadence**: each game patch needs a new datapack before the bot can
   render its replays. Consider falling back to the nearest older definitions
   only if decode failures stay near zero (not implemented: today it refuses).

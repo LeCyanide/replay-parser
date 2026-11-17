@@ -282,10 +282,6 @@ impl MapLayer {
                     let fill = if *is_self { ALLY } else { color.unwrap_or(NEUTRAL_FILL) };
                     let outline = is_detected_teammate.then_some(SPOTTED_OUTLINE);
                     let size = ship_size * if *is_self { 1.08 } else { 1.0 };
-                    if *is_self {
-                        // A ring, so viewers find the recording player at once.
-                        stroke_circle(pm, x, y, size * 0.78, 1.3 * k, [255; 3], 0.75 * alpha);
-                    }
                     self.glyphs.draw(
                         pm,
                         &ShipMark { x, y, yaw: *yaw, class: Class::of(*species), size, fill, alpha, outline },

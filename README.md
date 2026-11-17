@@ -47,7 +47,7 @@ The map (left, square):
 - ships as class icons in the team colour (allies `#4CE8AA`, enemies
   `#FE4D2A`), heading-rotated, with a fading trail; ships out of sight
   faded, wrecks where they sank; the recording player's ship slightly
-  larger with a white ring;
+  larger;
 - a gold ring outside the icon on allies (and the recording player) while
   the enemy spots them;
 - names in white, orange while the player is disconnected; placed so they
@@ -117,34 +117,37 @@ the same output, built on this crate instead.
 🖥 = needs a local game install (and its exact build) to build or verify.
 
 The parser's own roadmap (below) is done: the suite runs on this crate
-alone. What is left is mostly data for new game builds, and polish.
+alone. Next is putting the renderer in front of people — the Discord bot
+and the suite — then keeping up with game patches. `docs/INTEGRATION.md` is
+the brief for steps 1 and 2.
 
-1. **15.10 data** 🖥 — *blocked here.* The public entity definitions stop at
-   15.9, and 15.9's do not decode 15.10 (a third of entity packets fail), so
-   `wows-render` refuses 15.10 replays with `unsupported_version`. On a
-   machine with the game: `scripts/build-data.sh <game dir> <suite maps>
-   <data dir> 15_10_0`, then render a 15.10 replay and check it.
-2. **First run of `datapack` against an install** 🖥 — its output format is
-   tested with a hand-made pack, but it has never run on a real install:
-   entity definitions, the GameParams extract, `battle.xml` death reasons
-   and the `gui/battle_hud/` icons. Check the icon paths especially (they
-   follow a hand-supplied copy of the folder).
-3. **Install tests after this round** 🖥 — `WOWS_DIR=… cargo test --release
-   -- --ignored`.
-4. **Patch cadence** ☁ — every game patch needs a new data pack before the
-   bot can render its replays. Option: fall back to the nearest older
-   definitions when decode failures stay near zero (today: refused).
-5. **Render polish** ☁ — lineups and the feed may get cramped in large
-   battles (Operations); no test replay has more than 24 ships.
+1. **Discord bot: `/render`** ☁ (wows-tactics-bot) — a slash command that
+   takes a `.wowsreplay` and answers with the MP4, through
+   `bindings/node`. Deploy: the binary and a data directory on the VPS.
+2. **Suite** ☁ (tactics-suite) — merge the sidecar cut-over (its branch
+   `claude/keen-hawking-k8h8pf`, 530a14f; no PR yet) with the parser as a
+   git dependency instead of a sibling path; its event feed can take death
+   causes from `replay_parser::constants`; mirror any change to its
+   "Battle" panel in `render/src/sidebar.rs`.
+3. **Data for each game patch** 🖥 — `replay-dump datapack <game dir> <data
+   dir> [build] [key]` on a machine with the game, then copy the pack to the
+   bot host. Ran on a real install for the first time on 2026-11-17 (15.10,
+   build 13533378: 39 definition files, 1246 ships, 106 icons, about 3 s)
+   and rendered a 15.10 Random battle with it. 15.11 is on the test server
+   now. Option: fall back to the nearest older definitions when decode
+   failures stay near zero (today: refused).
+4. **Install tests** 🖥 — `WOWS_DIR=… cargo test --release --test install
+   -- --ignored`. Pass on the live install (2026-11-17: 242 replays of 15.9
+   and 15.10). Rerun after parser changes and each patch.
+5. **Render polish** ☁ — names of ships at the map's left edge are cut off
+   ("ünchen B"); lineups and the feed may get cramped in large battles
+   (Operations); no test replay has more than 24 ships.
 6. **Draw-command gaps** ☁ — now ours to fix rather than match: the
    tracer's ammo type is passed only as a colour (the renderer maps it back;
    see `shortcut:` in `render/src/map.rs`), spotting reasons are unnamed,
    hydrophone radius is unverified, and consumable radii ignore upgrades
    and commander skills.
 7. **Legacy replays** ☁ — pre-12.6 wire ids are unverified; needs a fixture.
-8. **Suite follow-ups** (tactics-suite repo) — its event feed can take death
-   causes from `replay_parser::constants`; mirror any change to its
-   "Battle" panel in `render/src/sidebar.rs`.
 
 Not planned: an in-process Node addon (the wrapper spawns the CLI, which
 isolates crashes and costs only process start-up).
