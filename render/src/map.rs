@@ -31,12 +31,25 @@ const TRACER_PX: f32 = 1.1;
 const TORPEDO_PX: f32 = 2.6;
 const PLANE_PX: f32 = 6.0;
 
+/// Battle seconds of track drawn behind each ship (about 1.2 s of video at ×32).
+const TRAIL_SECONDS: f32 = 40.0;
+/// A jump longer than this (minimap px at 768) breaks a trail: a respawn or a
+/// ship re-entering sight elsewhere.
+const TRAIL_BREAK_PX: f32 = 40.0;
+
+struct Trail {
+    color: Rgb,
+    /// (battle clock, minimap px at 768), oldest first.
+    points: std::collections::VecDeque<(f32, [f32; 2])>,
+}
+
 pub struct MapLayer {
     /// The background at output size: the map image, or a plain sea with a
     /// grid when there is none.
     pub background: Pixmap,
     pub size: u32,
     glyphs: Glyphs,
+    trails: std::collections::HashMap<u32, Trail>,
 }
 
 impl MapLayer {
@@ -60,13 +73,15 @@ impl MapLayer {
                 }
             }
         }
-        Self { background: bg, size, glyphs: Glyphs::default() }
+        Self { background: bg, size, glyphs: Glyphs::default(), trails: std::collections::HashMap::new() }
     }
 
     /// Paints `cmds` onto `pm` (which already holds the background at
     /// `(0, 0)`). `world` resolves dead ships' sides.
-    pub fn paint(&self, pm: &mut Pixmap, text: &mut Text, cmds: &[Draw<'_>], world: &World) {
+    pub fn paint(&mut self, pm: &mut Pixmap, text: &mut Text, cmds: &[Draw<'_>], world: &World, clock: f32) {
         let k = self.size as f32 / MINIMAP_SIZE as f32;
+        self.update_trails(cmds, clock);
+        self.paint_trails(pm, k, clock);
         let p = |v: [f32; 2]| [v[0] * k, v[1] * k];
         let r = |v: i32| v as f32 * k;
         let ship_size = SHIP_PX * k;
@@ -213,6 +228,10 @@ impl MapLayer {
                     let fill = if *is_self { ALLY } else { color.unwrap_or(NEUTRAL_FILL) };
                     let outline = (!is_self && *is_detected_teammate).then_some(SPOTTED_OUTLINE);
                     let size = ship_size * if *is_self { 1.08 } else { 1.0 };
+                    if *is_self {
+                        // A ring, so viewers find the recording player at once.
+                        stroke_circle(pm, x, y, size * 0.78, 1.3 * k, [255; 3], 0.75 * alpha);
+                    }
                     self.glyphs.draw(
                         pm,
                         &ShipMark { x, y, yaw: *yaw, class: Class::of(*species), size, fill, alpha, outline },
@@ -234,6 +253,62 @@ impl MapLayer {
             }
         }
         place_labels(pm, text, labels, &marks, ship_size, name_px);
+    }
+}
+
+impl MapLayer {
+    /// Extends the trails of ships in sight; a ship out of sight, dead, or
+    /// jumping loses its trail.
+    fn update_trails(&mut self, cmds: &[Draw<'_>], clock: f32) {
+        let mut seen = std::collections::HashSet::new();
+        for cmd in cmds {
+            let Draw::Ship { entity_id, pos, color: Some(color), detected: true, .. } = cmd else { continue };
+            seen.insert(*entity_id);
+            let t =
+                self.trails.entry(*entity_id).or_insert_with(|| Trail { color: *color, points: Default::default() });
+            t.color = *color;
+            if let Some(&(_, last)) = t.points.back()
+                && (last[0] - pos[0]).hypot(last[1] - pos[1]) > TRAIL_BREAK_PX
+            {
+                t.points.clear();
+            }
+            t.points.push_back((clock, *pos));
+            while t.points.front().is_some_and(|&(c, _)| c < clock - TRAIL_SECONDS) {
+                t.points.pop_front();
+            }
+        }
+        self.trails.retain(|id, _| seen.contains(id));
+    }
+
+    /// Each trail fades out towards its tail.
+    fn paint_trails(&self, pm: &mut Pixmap, k: f32, clock: f32) {
+        for t in self.trails.values() {
+            for (a, b) in t.points.iter().zip(t.points.iter().skip(1)) {
+                let age = (clock - b.0) / TRAIL_SECONDS;
+                let alpha = 0.55 * (1.0 - age).clamp(0.0, 1.0);
+                line(pm, [a.1[0] * k, a.1[1] * k], [b.1[0] * k, b.1[1] * k], 1.4 * k, t.color, alpha);
+            }
+        }
+    }
+
+    /// "Victory" / "Defeat" / "Draw" and the final score across the map, for
+    /// the held last frame.
+    pub fn result_banner(&self, pm: &mut Pixmap, text: &mut Text, result: Option<bool>, scores: (i64, i64)) {
+        let s = self.size as f32;
+        let (word, color) = match result {
+            Some(true) => ("Victory", ALLY),
+            Some(false) => ("Defeat", ENEMY),
+            None => ("Draw", LABEL),
+        };
+        let h = s * 0.2;
+        let y0 = (s - h) / 2.0;
+        rect(pm, 0.0, y0, s, h, [0x0d, 0x11, 0x17], 0.82);
+        rect(pm, 0.0, y0, s, 2.0, color, 0.9);
+        rect(pm, 0.0, y0 + h - 2.0, s, 2.0, color, 0.9);
+        let big = h * 0.36;
+        text.draw(pm, word, s / 2.0, y0 + h * 0.5, big, Weight::Bold, Align::Center, color, 1.0);
+        let score = format!("{}  :  {}", scores.0, scores.1);
+        text.draw(pm, &score, s / 2.0, y0 + h * 0.8, big * 0.45, Weight::Bold, Align::Center, LABEL, 0.9);
     }
 }
 

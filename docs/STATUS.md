@@ -65,6 +65,9 @@ events).
   checked against the replays (every torpedo death follows a torpedo hit by
   the killer, shell deaths follow shell hits) and each build's own table from
   `battle.xml` via `datapack`.
+- **Map extras**: fading 40 s trails behind ships in sight, a ring around
+  the recording player's ship, and a Victory/Defeat/Draw banner with the
+  final score on the held last frame.
 - **Ship names** on the map are placed to avoid each other, ship marks and
   health bars.
 - **Tests**: `render/tests/render.rs` renders all 7 fixtures (frame count,

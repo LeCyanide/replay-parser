@@ -188,7 +188,7 @@ pub fn render(
     let (w, h) = (opts.width, opts.height);
     let map_px = h.min(w);
     let side_w = (w - map_px) as f32;
-    let layer = MapLayer::new(map_px, map.as_ref().map(|m| m.png.as_slice()));
+    let mut layer = MapLayer::new(map_px, map.as_ref().map(|m| m.png.as_slice()));
     let painter = SidebarPainter::default();
     let mut text = Text::new();
     let fps = opts.fps as f32;
@@ -227,7 +227,7 @@ pub fn render(
         |world: &World, t: f32, frame: &mut Pixmap, cap_events: &mut Vec<Event>, caps_seen: &mut BTreeMap<u32, i64>| {
             let cmds = draw::frame(world, &geometry, &labels, gp, &flights, t);
             frame.draw_pixmap(0, 0, layer.background.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
-            layer.paint(frame, &mut text, &cmds, world);
+            layer.paint(frame, &mut text, &cmds, world, t);
             track_caps(world, t - span.start, caps_seen, cap_events);
             let sb = sidebar(
                 world,
@@ -260,6 +260,15 @@ pub fn render(
         sink.frame(&frame)?;
         k += 1;
         progress(Progress { stage: Stage::Render, done: k, total });
+    }
+    if hold > 0 {
+        let own = world.own_team();
+        let score = |t: Option<i64>| t.and_then(|t| world.scores.get(t as usize).copied()).unwrap_or(0);
+        // winnerTeamId: a team, or -1 for a draw; none when the replay ends first.
+        if let Some(w) = world.winner {
+            let result = (w >= 0).then(|| Some(w) == own);
+            layer.result_banner(&mut frame, &mut text, result, (score(own), score(own.map(|o| 1 - o))));
+        }
     }
     for _ in 0..hold {
         sink.frame(&frame)?;
