@@ -77,6 +77,8 @@ impl MapLayer {
             (Some(_), Some(_)) => ENEMY,
             _ => NEUTRAL_FILL,
         };
+        let mut marks: Vec<Rect> = Vec::new();
+        let mut labels: Vec<NameLabel> = Vec::new();
         // The recording player's ship in its team's colour, not the
         // renderer's white (the suite's rule).
         for cmd in cmds {
@@ -173,6 +175,7 @@ impl MapLayer {
                     let (bx, by) = (x - w / 2.0, y - ship_size * 0.75);
                     rect(pm, bx, by, w, h, *background_color, *background_alpha);
                     rect(pm, bx, by, w * fraction.clamp(0.0, 1.0), h, *fill_color, 1.0);
+                    marks.push(Rect { x0: bx, y0: by, x1: bx + w, y1: by + h });
                 }
                 Draw::DeadShip { entity_id, pos, yaw, species, is_self, .. } => {
                     let [x, y] = p(*pos);
@@ -215,15 +218,87 @@ impl MapLayer {
                         &ShipMark { x, y, yaw: *yaw, class: Class::of(*species), size, fill, alpha, outline },
                     );
                     let label = ship_name.as_deref().or(*player_name).map(|n| n.trim_matches(':'));
+                    marks.push(Rect::around(x, y, size * 0.6));
                     if let Some(l) = label {
-                        let ty = y + ship_size * 0.72 + text.cap_height(name_px);
-                        let c = name_color.unwrap_or(LABEL);
-                        // A dark halo keeps names readable over bright map areas.
-                        text.draw(pm, l, x + 0.6, ty + 0.6, name_px, Weight::Bold, Align::Center, [0; 3], 0.6 * alpha);
-                        text.draw(pm, l, x, ty, name_px, Weight::Bold, Align::Center, c, (alpha + 0.25).min(1.0));
+                        labels.push(NameLabel {
+                            text: l.to_owned(),
+                            x,
+                            y,
+                            color: name_color.unwrap_or(LABEL),
+                            alpha: (alpha + 0.25).min(1.0),
+                            detected: *detected,
+                            is_self: *is_self,
+                        });
                     }
                 }
             }
         }
+        place_labels(pm, text, labels, &marks, ship_size, name_px);
+    }
+}
+
+/// An axis-aligned box, for keeping names apart.
+#[derive(Clone, Copy, Debug)]
+struct Rect {
+    x0: f32,
+    y0: f32,
+    x1: f32,
+    y1: f32,
+}
+
+impl Rect {
+    fn around(x: f32, y: f32, half: f32) -> Self {
+        Self { x0: x - half, y0: y - half, x1: x + half, y1: y + half }
+    }
+
+    fn overlaps(&self, o: &Rect) -> bool {
+        self.x0 < o.x1 && o.x0 < self.x1 && self.y0 < o.y1 && o.y0 < self.y1
+    }
+}
+
+struct NameLabel {
+    text: String,
+    x: f32,
+    y: f32,
+    color: Rgb,
+    alpha: f32,
+    detected: bool,
+    is_self: bool,
+}
+
+/// Draws ship names after every mark, each at the first free spot of: below
+/// the ship, above its health bar, right, left. Names that fit nowhere are
+/// dropped for ships out of sight and drawn faded below for ships in sight.
+/// The recording player's ship is placed first, then ships in sight.
+fn place_labels(pm: &mut Pixmap, text: &mut Text, mut labels: Vec<NameLabel>, marks: &[Rect], ship: f32, px: f32) {
+    labels.sort_by_key(|l| (!l.is_self, !l.detected));
+    let cap = text.cap_height(px);
+    let pad = px * 0.15;
+    let mut placed: Vec<Rect> = Vec::new();
+    for l in labels {
+        let w = text.width(&l.text, px, Weight::Bold);
+        // Candidate baselines and left edges.
+        let below = (l.x - w / 2.0, l.y + ship * 0.72 + cap);
+        let candidates = [
+            below,
+            (l.x - w / 2.0, l.y - ship * 0.95),
+            // Clear of the ship's own mark (half-size 0.6 × ship).
+            (l.x + ship * 0.62 + pad, l.y + cap / 2.0),
+            (l.x - ship * 0.62 - pad - w, l.y + cap / 2.0),
+        ];
+        let rect = |(x, b): (f32, f32)| Rect { x0: x - pad, y0: b - cap - pad, x1: x + w + pad, y1: b + pad * 2.0 };
+        let free = candidates.iter().copied().find(|&c| {
+            let r = rect(c);
+            !placed.iter().any(|p| p.overlaps(&r)) && !marks.iter().any(|m| m.overlaps(&r))
+        });
+        let (at, alpha) = match free {
+            Some(c) => (c, l.alpha),
+            None if l.detected || l.is_self => (below, l.alpha * 0.45),
+            None => continue,
+        };
+        placed.push(rect(at));
+        // A dark halo keeps names readable over bright map areas.
+        text.draw(pm, &l.text, at.0 + 0.6, at.1 + 0.6, px, Weight::Bold, Align::Left, [0; 3], 0.6 * alpha);
+        text.draw(pm, &l.text, at.0, at.1, px, Weight::Bold, Align::Left, l.color, alpha);
     }
 }
