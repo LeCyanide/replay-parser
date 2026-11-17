@@ -40,6 +40,7 @@ data/defs/<key>/            entity definitions per game version (required)
 data/gameparams/<key>.json  ship names and classes (optional but expected)
 data/maps/                  map images (optional; a plain grid without)
 data/fonts/                 fallback fonts (optional; .ttf/.otf/.ttc)
+data/battle_hud/            plane markers and kill icons from the client's gui/battle_hud/ (optional; written by datapack)
 ```
 
 The built-in font (Inter) covers Latin, Cyrillic and Greek. For CJK and

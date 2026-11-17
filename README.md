@@ -43,8 +43,9 @@ The data directory:
 ```text
 <data>/defs/<key>/            entity definitions (scripts/: entities.xml, entity_defs/) — required
 <data>/gameparams/<key>.json  GameParams extract and ship names — optional (without it: player names, cruiser marks)
-<data>/maps/maps.json         map images and sizes, in the suite's seed/maps format — optional (plain grid without)
+<data>/maps/maps.json         map images and sizes, in the suite's seed/maps format — optional (plain sea without)
 <data>/fonts/                fallback fonts for names Inter lacks (CJK, …) — optional
+<data>/battle_hud/            the client's gui/battle_hud/ plane markers and kill icons — optional (drawn shapes and words without)
 ```
 
 `<key>` is the replay's build number or its version (`15_10_0`). Both

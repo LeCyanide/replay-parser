@@ -191,6 +191,10 @@ pub fn render(
     let map_px = h.min(w);
     let side_w = (w - map_px) as f32;
     let painter = SidebarPainter::default();
+    let icons = data.icons();
+    if icons.planes.is_empty() {
+        warnings.push("no battle_hud icons in the data dir: planes drawn as shapes, kills named in words".into());
+    }
     let mut text = Text::new();
     for (path, bytes) in data.fonts() {
         if !text.add_fallback(bytes) {
@@ -234,7 +238,7 @@ pub fn render(
         |world: &World, t: f32, frame: &mut Pixmap, cap_events: &mut Vec<Event>, caps_seen: &mut BTreeMap<u32, i64>| {
             let cmds = draw::frame(world, &geometry, &labels, gp, &flights, t);
             frame.draw_pixmap(0, 0, layer.background.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
-            layer.paint(frame, &mut text, &cmds, world, t);
+            layer.paint(frame, &mut text, &icons, &cmds, world, t);
             track_caps(world, t - span.start, caps_seen, cap_events);
             let sb = sidebar(
                 world,
@@ -248,7 +252,7 @@ pub fn render(
                 subtitle.clone(),
                 death_reasons,
             );
-            painter.paint(frame, &mut text, &sb, map_px as f32, side_w, h as f32);
+            painter.paint(frame, &mut text, &icons, &sb, map_px as f32, side_w, h as f32);
         };
     for p in Packets::new(&replay.packets, version) {
         let event = decoder.feed(&p).ok().flatten();
@@ -402,6 +406,7 @@ fn sidebar(
         };
         Some(Who { name, class: Class::of(species.as_deref()), ally })
     };
+    let reason = |code: i64| replay_parser::constants::death_reason(code, death_reasons);
     let mut events: Vec<Event> = world
         .deaths
         .iter()
@@ -411,7 +416,8 @@ fn sidebar(
                 kind: EventKind::Kill {
                     killer: (d.killer != 0 && d.killer != d.victim).then(|| who(d.killer)).flatten(),
                     victim: who(d.victim)?,
-                    verb: kill_verb(replay_parser::constants::death_reason(d.reason, death_reasons)),
+                    verb: kill_verb(reason(d.reason)),
+                    frag: frag_icon(reason(d.reason)),
                 },
             })
         })

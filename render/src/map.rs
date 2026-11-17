@@ -9,6 +9,7 @@ use tiny_skia::Pixmap;
 use tiny_skia::PixmapPaint;
 use tiny_skia::Transform;
 
+use crate::data::Icons;
 use crate::paint::*;
 use crate::text::Align;
 use crate::text::Text;
@@ -44,6 +45,8 @@ const HEALTH_H_PX: f32 = 3.0;
 const TRACER_PX: f32 = 1.1;
 const TORPEDO_PX: f32 = 3.4;
 const PLANE_PX: f32 = 9.0;
+/// The game's plane markers are 15 px; drawn a little larger to read on video.
+const PLANE_ICON_PX: f32 = 17.0;
 
 /// Battle seconds of track drawn behind each ship (about 1.2 s of video at ×32).
 const TRAIL_SECONDS: f32 = 40.0;
@@ -117,7 +120,15 @@ fn ammo_tint(tip: Rgb) -> Rgb {
 impl MapLayer {
     /// Paints `cmds` onto `pm` (which already holds the background at
     /// `(0, 0)`). `world` resolves dead ships' sides.
-    pub fn paint(&mut self, pm: &mut Pixmap, text: &mut Text, cmds: &[Draw<'_>], world: &World, clock: f32) {
+    pub fn paint(
+        &mut self,
+        pm: &mut Pixmap,
+        text: &mut Text,
+        icons: &Icons,
+        cmds: &[Draw<'_>],
+        world: &World,
+        clock: f32,
+    ) {
         let k = self.size as f32 / MINIMAP_SIZE as f32;
         self.update_trails(cmds, clock);
         self.paint_trails(pm, k, clock);
@@ -209,8 +220,13 @@ impl MapLayer {
                 }
                 Draw::Plane { pos, icon_key, .. } => {
                     let [x, y] = p(*pos);
-                    let color = if icon_key.ends_with("_enemy") { ENEMY } else { ALLY };
-                    plane_icon(pm, PlaneKind::of(icon_key), x, y, PLANE_PX / 2.0 * k, color);
+                    match icons.planes.get(icon_key.as_str()) {
+                        Some(img) => image(pm, img, x, y, PLANE_ICON_PX * k, 1.0),
+                        None => {
+                            let color = if icon_key.ends_with("_enemy") { ENEMY } else { ALLY };
+                            plane_icon(pm, PlaneKind::of(icon_key), x, y, PLANE_PX / 2.0 * k, color);
+                        }
+                    }
                 }
                 Draw::CameraDirection { pos, yaw, color, length, .. } => {
                     let [x, y] = p(*pos);
