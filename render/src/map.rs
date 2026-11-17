@@ -21,8 +21,13 @@ const SPOTTED_OUTLINE: Rgb = [0xf5, 0xc8, 0x4c];
 const LABEL: Rgb = [0xe8, 0xee, 0xf6];
 /// Names of players whose client has dropped.
 const DISCONNECTED: Rgb = [0xff, 0x9f, 0x1c];
-/// Shell streaks; the tip carries the ammo type's colour.
-const TRACER: Rgb = [0xff, 0xc4, 0x3d];
+/// Shell streaks; the front of each streak takes the ammo type's colour.
+const TRACER: Rgb = [0xff, 0xd0, 0x4a];
+const TRACER_AP: Rgb = [0xff, 0xff, 0xff];
+const TRACER_HE: Rgb = [0xff, 0x7a, 0x1a];
+const TRACER_SAP: Rgb = [0xff, 0x4d, 0x5e];
+/// Share of a streak, from its head, drawn in the ammo colour.
+const TRACER_HEAD: f32 = 0.4;
 const OUTLINE: Rgb = [0x08, 0x0c, 0x11];
 /// Health by fraction, in the palette's tones rather than pure RGB.
 const HP_HIGH: Rgb = [0x7b, 0xd8, 0x8f];
@@ -63,7 +68,7 @@ pub struct MapLayer {
 }
 
 impl MapLayer {
-    pub fn new(size: u32, png: Option<&[u8]>, text: &mut Text) -> Self {
+    pub fn new(size: u32, png: Option<&[u8]>, grid: bool, text: &mut Text) -> Self {
         let mut bg = Pixmap::new(size, size).expect("non-zero map size");
         bg.fill(tiny_skia::Color::from_rgba8(SEA[0], SEA[1], SEA[2], 255));
         if let Some(img) = png.and_then(|b| Pixmap::decode_png(b).ok()) {
@@ -71,26 +76,45 @@ impl MapLayer {
             let paint = PixmapPaint { quality: FilterQuality::Bicubic, ..PixmapPaint::default() };
             bg.draw_pixmap(0, 0, img.as_ref(), &paint, Transform::from_scale(k, k), None);
         }
-        // The in-game minimap's 10×10 grid: columns 1–10, rows A–J.
-        let s = size as f32;
-        let cell = s / 10.0;
-        for i in 1..10 {
-            let p = cell * i as f32;
-            line(&mut bg, [p, 0.0], [p, s], 1.0, GRID, 0.12);
-            line(&mut bg, [0.0, p], [s, p], 1.0, GRID, 0.12);
-        }
-        let px = s / 768.0 * 11.0;
-        for i in 0..10u8 {
-            let c = cell * (f32::from(i) + 0.5);
-            let col = (i + 1).to_string();
-            text.draw(&mut bg, &col, c, px * 1.3, px, Weight::Bold, Align::Center, GRID, 0.35);
-            let row = char::from(b'A' + i).to_string();
-            let y = c + text.cap_height(px) / 2.0;
-            text.draw(&mut bg, &row, px * 0.5, y, px, Weight::Bold, Align::Left, GRID, 0.35);
+        if grid {
+            draw_grid(&mut bg, text);
         }
         Self { background: bg, size, glyphs: Glyphs::default(), trails: std::collections::BTreeMap::new() }
     }
+}
 
+/// The in-game minimap's 10×10 grid: columns 1–10, rows A–J.
+fn draw_grid(bg: &mut Pixmap, text: &mut Text) {
+    let s = bg.width() as f32;
+    let cell = s / 10.0;
+    for i in 1..10 {
+        let p = cell * i as f32;
+        line(bg, [p, 0.0], [p, s], 1.0, GRID, 0.12);
+        line(bg, [0.0, p], [s, p], 1.0, GRID, 0.12);
+    }
+    let px = s / 768.0 * 11.0;
+    for i in 0..10u8 {
+        let c = cell * (f32::from(i) + 0.5);
+        let col = (i + 1).to_string();
+        text.draw(bg, &col, c, px * 1.3, px, Weight::Bold, Align::Center, GRID, 0.35);
+        let row = char::from(b'A' + i).to_string();
+        let y = c + text.cap_height(px) / 2.0;
+        text.draw(bg, &row, px * 0.5, y, px, Weight::Bold, Align::Left, GRID, 0.35);
+    }
+}
+
+/// The streak colour for an ammo type, from the draw command's tip colour
+/// (`replay_parser::draw`'s `ammo_color`: AP blue, HE orange, SAP red).
+// shortcut: keyed on the parser's tip colours; add the ammo type to the draw command if those change.
+fn ammo_tint(tip: Rgb) -> Rgb {
+    match tip {
+        [255, 180, 80] => TRACER_HE,
+        [255, 100, 100] => TRACER_SAP,
+        _ => TRACER_AP,
+    }
+}
+
+impl MapLayer {
     /// Paints `cmds` onto `pm` (which already holds the background at
     /// `(0, 0)`). `world` resolves dead ships' sides.
     pub fn paint(&mut self, pm: &mut Pixmap, text: &mut Text, cmds: &[Draw<'_>], world: &World, clock: f32) {
@@ -108,6 +132,8 @@ impl MapLayer {
             _ => NEUTRAL_FILL,
         };
         let mut marks: Vec<Rect> = Vec::new();
+        // The last streak drawn, for its head: (tail, head, width, alpha).
+        let mut tracer: Option<([f32; 2], [f32; 2], f32, f32)> = None;
         let mut labels: Vec<NameLabel> = Vec::new();
         // The recording player's ship in its team's colour, not the
         // renderer's white (the suite's rule).
@@ -163,14 +189,17 @@ impl MapLayer {
                 }
                 Draw::ShotTracer { from, to, secondary, .. } => {
                     let w = if *secondary { TRACER_PX * 0.7 } else { TRACER_PX } * k;
-                    line(pm, p(*from), p(*to), w, TRACER, if *secondary { 0.4 } else { 0.9 });
+                    let a = if *secondary { 0.4 } else { 0.9 };
+                    line(pm, p(*from), p(*to), w, TRACER, a);
+                    tracer = Some((p(*from), p(*to), w, a));
                 }
-                Draw::ShotTracerTip { at, color, secondary } => {
-                    // The ammo type's colour (AP blue, HE orange, SAP red) on a dark rim.
-                    let [x, y] = p(*at);
-                    let (rad, a) = if *secondary { (1.3, 0.6) } else { (2.0, 1.0) };
-                    fill_circle(pm, x, y, (rad + 0.6) * k, OUTLINE, 0.7 * a);
-                    fill_circle(pm, x, y, rad * k, *color, a);
+                Draw::ShotTracerTip { at, color, .. } => {
+                    // The front of the streak it belongs to, in the ammo's colour.
+                    if let Some((tail, head, w, a)) = tracer.take().filter(|t| t.1 == p(*at)) {
+                        let mid =
+                            [head[0] + (tail[0] - head[0]) * TRACER_HEAD, head[1] + (tail[1] - head[1]) * TRACER_HEAD];
+                        line(pm, mid, head, w * 1.3, ammo_tint(*color), a);
+                    }
                 }
                 Draw::Torpedo { pos, color } => {
                     let [x, y] = p(*pos);
@@ -235,7 +264,7 @@ impl MapLayer {
                     let [x, y] = p(*pos);
                     let alpha = if *detected { *opacity } else { opacity * 0.55 };
                     let fill = if *is_self { ALLY } else { color.unwrap_or(NEUTRAL_FILL) };
-                    let outline = (!is_self && *is_detected_teammate).then_some(SPOTTED_OUTLINE);
+                    let outline = is_detected_teammate.then_some(SPOTTED_OUTLINE);
                     let size = ship_size * if *is_self { 1.08 } else { 1.0 };
                     if *is_self {
                         // A ring, so viewers find the recording player at once.

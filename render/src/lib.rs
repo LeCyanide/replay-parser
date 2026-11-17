@@ -32,6 +32,8 @@ pub struct RenderOptions {
     pub duration: Option<f32>,
     /// Hold the final frame (the result) for 1.5 s.
     pub hold_end: bool,
+    /// Draw the minimap's 10×10 grid (1–10, A–J) over the map.
+    pub grid: bool,
     /// Upper bound on the MP4's size in bytes; the bitrate is set from it
     /// and the video's length.
     pub max_bytes: u64,
@@ -46,6 +48,7 @@ impl Default for RenderOptions {
             speed: 32.0,
             duration: None,
             hold_end: true,
+            grid: true,
             max_bytes: DEFAULT_MAX_BYTES,
         }
     }

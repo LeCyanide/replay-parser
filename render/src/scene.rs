@@ -197,7 +197,7 @@ pub fn render(
             warnings.push(format!("{}: not a font this renderer can read; skipped", path.display()));
         }
     }
-    let mut layer = MapLayer::new(map_px, map.as_ref().map(|m| m.png.as_slice()), &mut text);
+    let mut layer = MapLayer::new(map_px, map.as_ref().map(|m| m.png.as_slice()), opts.grid, &mut text);
     let fps = opts.fps as f32;
     let battle = span.end - span.start;
     let hold = if opts.hold_end { (fps * HOLD_SECONDS) as u32 } else { 0 };

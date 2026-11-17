@@ -1,7 +1,7 @@
 //! wows-render <replay.wowsreplay | -> --out <file.mp4 | -> --data <dir>
 //!             [--speed 32 | --duration <s>] [--max-mb 8] [--fps 30]
 //!             [--width 1080] [--height 720] [--progress json]
-//!             [--frames <dir> [--every N]]
+//!             [--frames <dir> [--every N]] [--no-hold] [--no-grid]
 //!
 //! `-` reads the replay from stdin / writes the MP4 to stdout. With
 //! `--progress json`, stderr carries one JSON object per line:
@@ -50,6 +50,7 @@ fn parse() -> Result<Args, String> {
             "--frames" => frames = Some(PathBuf::from(val("--frames")?)),
             "--every" => every = (num(val("--every")?, "--every")? as u32).max(1),
             "--no-hold" => opts.hold_end = false,
+            "--no-grid" => opts.grid = false,
             "-h" | "--help" => return Err(String::new()),
             s if input.is_none() && (s == "-" || !s.starts_with('-')) => input = Some(s.to_owned()),
             s => return Err(format!("unexpected argument {s}")),
@@ -88,7 +89,7 @@ fn main() {
 
 const USAGE: &str = "usage: wows-render <replay.wowsreplay | -> --out <file.mp4 | -> --data <dir>
        [--speed 32 | --duration <s>] [--max-mb 8] [--fps 30] [--width 1080] [--height 720] [--progress json]
-       [--frames <png dir> [--every 30]] [--no-hold]";
+       [--frames <png dir> [--every 30]] [--no-hold] [--no-grid]";
 
 fn run(a: Args) -> Result<(), RenderError> {
     let bytes = if a.input == "-" {

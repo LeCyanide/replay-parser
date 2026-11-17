@@ -198,12 +198,14 @@ impl Glyphs {
         // Glyphs point up (screen −y, i.e. angle π/2); rotate to `yaw`.
         let rot = (std::f32::consts::FRAC_PI_2 - m.yaw).to_degrees();
         let t = Transform::from_scale(k, k).post_rotate(rot).post_translate(m.x, m.y);
+        let stroke =
+            |width: f32| Stroke { width: width / k, line_join: tiny_skia::LineJoin::Round, ..Stroke::default() };
+        // Spotted: a ring outside the icon. Stroked at twice the width
+        // first, so the fill covers its inner half and the icon is unchanged.
+        if let Some(c) = m.outline {
+            pm.stroke_path(path, &paint(c, m.alpha), &stroke(2.0 * 1.8), t, None);
+        }
         pm.fill_path(path, &paint(m.fill, m.alpha), FillRule::Winding, t, None);
-        let (edge, width) = match m.outline {
-            Some(c) => (c, 1.8),
-            None => (hex(0x080c11), 0.9),
-        };
-        let s = Stroke { width: width / k, line_join: tiny_skia::LineJoin::Round, ..Stroke::default() };
-        pm.stroke_path(path, &paint(edge, m.alpha), &s, t, None);
+        pm.stroke_path(path, &paint(hex(0x080c11), m.alpha), &stroke(0.9), t, None);
     }
 }

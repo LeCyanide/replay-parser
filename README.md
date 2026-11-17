@@ -35,7 +35,8 @@ follows from it, error `too_large` if it cannot be met), `--fps 30`,
 `--width 1080 --height 720` (square map at full height, sidebar in the
 rest), `--progress json` (machine-readable progress and errors on stderr; see
 `bindings/node/README.md`), `-` for stdin/stdout, and `--frames <dir>
-[--every N]` to write PNG stills instead of a video.
+[--every N]` to write PNG stills instead of a video, and `--no-grid` to leave
+the 1–10 / A–J grid off the map.
 
 The data directory:
 
