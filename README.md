@@ -116,6 +116,45 @@ the same output, built on this crate instead.
 ☁ = can be built and verified with no game install (cloud/CI).
 🖥 = needs a local game install (and its exact build) to build or verify.
 
+The parser's own roadmap (below) is done: the suite runs on this crate
+alone. What is left is mostly data for new game builds, and polish.
+
+1. **15.10 data** 🖥 — *blocked here.* The public entity definitions stop at
+   15.9, and 15.9's do not decode 15.10 (a third of entity packets fail), so
+   `wows-render` refuses 15.10 replays with `unsupported_version`. On a
+   machine with the game: `scripts/build-data.sh <game dir> <suite maps>
+   <data dir> 15_10_0`, then render a 15.10 replay and check it.
+2. **First run of `datapack` against an install** 🖥 — its output format is
+   tested with a hand-made pack, but it has never run on a real install:
+   entity definitions, the GameParams extract, `battle.xml` death reasons
+   and the `gui/battle_hud/` icons. Check the icon paths especially (they
+   follow a hand-supplied copy of the folder).
+3. **Install tests after this round** 🖥 — `WOWS_DIR=… cargo test --release
+   -- --ignored`.
+4. **Patch cadence** ☁ — every game patch needs a new data pack before the
+   bot can render its replays. Option: fall back to the nearest older
+   definitions when decode failures stay near zero (today: refused).
+5. **Render polish** ☁ — the subtitle is cut off on long player/ship names;
+   the event area is mostly empty early in a battle; the result banner
+   covers the middle of the map; lineups and the feed get cramped in large
+   battles (Operations).
+6. **Draw-command gaps** ☁ — now ours to fix rather than match: the
+   tracer's ammo type is passed only as a colour (the renderer maps it back;
+   see `shortcut:` in `render/src/map.rs`), spotting reasons are unnamed,
+   hydrophone radius is unverified, and consumable radii ignore upgrades
+   and commander skills.
+7. **Legacy replays** ☁ — pre-12.6 wire ids are unverified; needs a fixture.
+8. **Suite follow-ups** (tactics-suite repo) — its event feed can take death
+   causes from `replay_parser::constants`; mirror any change to its
+   "Battle" panel in `render/src/sidebar.rs`.
+
+Not planned: an in-process Node addon (the wrapper spawns the CLI, which
+isolates crashes and costs only process start-up).
+
+### Parser roadmap (done)
+
+The steps that replaced landaire's crates in the suite's sidecar.
+
 1. **Container** ☁ — done. Arena-info JSON, extra blocks, Blowfish/XOR-chain
    decryption, zlib, truncated-stream recovery. `probe` needs only this.
 2. **Packet framing + engine-fixed payloads** ☁ — done. Version-keyed wire-id
@@ -135,7 +174,7 @@ the same output, built on this crate instead.
 6. **Entity definitions + entity decoding** ☁ — done (`defs`, `entity`,
    `nested`) from a loose `scripts/` directory or the install. Methods, properties, creates and nested property updates decode
    against tracked per-entity state; see Tests for what is checked.
-7. **GameParams** 🖥 — *started* (`gameparams`): `content/GameParams.data`
+7. **GameParams** 🖥 — done for what drawing uses (`gameparams`): `content/GameParams.data`
    is a zlib stream written back to front holding a protocol-2 pickle of
    `{region: {name: GPData}}`; region `""` is the base. Extracted: ships (id,
    index for the catalogue name, species, nation, tier), projectiles
@@ -159,7 +198,7 @@ the same output, built on this crate instead.
    consumable radii, the recording player's camera. Much of it can be built
    and checked here on the fixtures; what needs GameParams (ranges, shell
    flight times, plane icons) waits for step 7.
-   *Started* (`world`): ship position/heading, health, team, alive and
+   Done (`world`): ship position/heading, health, team, alive and
    area-of-interest; each ship's arena-info player (by its Vehicle entity
    id, which every `onArenaStateReceived` roster entry holds, for players
    and bots alike); deaths with killer and reason code; team scores, battle
@@ -185,7 +224,7 @@ the same output, built on this crate instead.
    150 s without GameParams.
 9. **Draw-command emitter** 🖥 — world state → the existing `format.rs` record
    tags (`SHIP`, `HEALTH_BAR`, `SHOT_TRACER`, `TORPEDO`, `SMOKE`, `PLANE`,
-   `CAPTURE_POINT`, …). *Started* (`draw`): `draw::frame` gives one frame's
+   `CAPTURE_POINT`, …). Done (`draw`): `draw::frame` gives one frame's
    commands in the renderer's pixel space (768 px square, north up; the
    map's side from `space.settings` bounds, `(chunks − 4) × chunkSize`) with
    its colours and rules, for `CAPTURE_POINT`, `TORPEDO`, `SMOKE`, `SHIP`
@@ -267,8 +306,8 @@ the same output, built on this crate instead.
     and the `.wtreply` format is unchanged, so toolkit-era bakes still load.
     Comparing against the toolkit now needs a toolkit-era sidecar binary.
 
-Next: the toolkit's gaps in 9 are ours to fix or keep now that parity is
-no longer the target; new game builds go through 11.
+New game builds go through 11; the toolkit's gaps in 9 are in the roadmap
+above.
 
 ## Usage
 

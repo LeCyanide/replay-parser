@@ -1,6 +1,7 @@
 # Status and open tasks
 
-Last updated: 2026-11-17.
+Last updated: 2026-11-17. The ordered plan is the README's Roadmap; this
+file keeps the details.
 
 ## Goal
 
@@ -58,8 +59,8 @@ events).
   (no network inside containers), CI runs it.
 - **CI** (`.github/workflows/ci.yml`): format, clippy `-D warnings`, all
   tests with fetched fixtures and ffmpeg, the Node wrapper's tests, and a
-  Docker build with a smoke render. Its steps pass locally; it has not run
-  on GitHub yet.
+  Docker build with a smoke render. Runs on every push; green on PRs 1
+  and 2.
 - **Death causes** in the event feed (torpedoed, burned, flooded, rammed,
   bombed, secondaries, …): `replay_parser::constants`, with a default table
   checked against the replays (every torpedo death follows a torpedo hit by
@@ -79,6 +80,19 @@ events).
   battle span, frames change, sidebar painted), loads a data pack, and checks
   the unsupported-version error, and encodes a short MP4. Workspace: 48 Rust
   tests pass (including the encoder's ffprobe/ffmpeg checks), clippy clean.
+
+## Done: render cosmetics (PR 2)
+
+- Names white, orange when disconnected; the selected weapon no longer
+  colours them.
+- Spotted: a gold ring outside the icon, on allies and the recording player.
+- Tracers yellow with the front in the ammo's colour (AP white, HE orange,
+  SAP red); torpedoes larger with a rim; radar/hydro as tinted circles.
+- The game's plane markers and kill-type icons from `<data>/battle_hud/`
+  (shapes and words without them); `datapack` copies them from an install.
+- A faded 1–10 / A–J grid by default (`--no-grid`, `grid: false` to leave
+  it off); health bars in palette tones.
+- Sidebar: event times on the countdown clock, caps in label order.
 
 ## Blocked here, needs a game install (🖥)
 
@@ -105,7 +119,6 @@ events).
 - **Patch cadence**: each game patch needs a new datapack before the bot can
   render its replays. Consider falling back to the nearest older definitions
   only if decode failures stay near zero (not implemented: today it refuses).
-- **Label overlap** on crowded maps: names are not de-collided.
 - **Sidebar density** for large battles (Operations, 12 v 12 plus bots): the
   lineup rows shrink to fit, events show only the newest that fit.
 - **Suite sidecar**: tactics-suite's `claude/keen-hawking-k8h8pf` sidecar
