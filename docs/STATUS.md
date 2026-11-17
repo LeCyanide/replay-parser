@@ -108,6 +108,11 @@ events).
 - **Label overlap** on crowded maps: names are not de-collided.
 - **Sidebar density** for large battles (Operations, 12 v 12 plus bots): the
   lineup rows shrink to fit, events show only the newest that fit.
+- **Suite sidecar**: tactics-suite's `claude/keen-hawking-k8h8pf` sidecar
+  (path dependency on a sibling checkout of this repo) builds unchanged
+  against this branch and `probe` works (checked 2026-11-17). Its event
+  feed could adopt `replay_parser::constants` for death causes; that change
+  belongs in the suite repo.
 - **Suite parity**: the suite's sidebar (`ReplayEventsPanel`) is on the
   suite's `prototype` branch; if it changes, mirror it in `render/src/sidebar.rs`.
 - **Node addon**: the wrapper spawns the CLI (simple, isolates crashes). An
