@@ -10,6 +10,7 @@ export type CliErrorCode =
   | "bad_replay"
   | "missing_data"
   | "io"
+  | "too_large"
   | "internal";
 
 /** Error codes produced by this wrapper. */
@@ -22,6 +23,7 @@ const CLI_CODES: ReadonlySet<string> = new Set<CliErrorCode>([
   "bad_replay",
   "missing_data",
   "io",
+  "too_large",
   "internal",
 ]);
 
@@ -65,8 +67,13 @@ export interface RenderOptions {
    * Default: env WOWS_RENDER_BIN, else `wows-render` on PATH.
    */
   binary?: string | readonly string[];
-  /** Seconds of video (CLI default 30). */
+  /** Playback speed against the battle (CLI default 32: a 20-minute battle
+   *  becomes 37.5 s). Ignored when `duration` is set. */
+  speed?: number;
+  /** Fixed video length in seconds instead of a fixed speed. */
   duration?: number;
+  /** Size cap for the MP4 in megabytes (10^6 bytes; CLI default 8). */
+  maxMb?: number;
   /** Frames per second (CLI default 30). */
   fps?: number;
   /** Pixels (CLI default 1080). */
@@ -218,7 +225,9 @@ function buildArgs(opts: RenderOptions, fromStdin: boolean): string[] {
   const num = (flag: string, v: number | undefined): void => {
     if (v !== undefined) args.push(flag, String(v));
   };
+  num("--speed", opts.speed);
   num("--duration", opts.duration);
+  num("--max-mb", opts.maxMb);
   num("--fps", opts.fps);
   num("--width", opts.width);
   num("--height", opts.height);

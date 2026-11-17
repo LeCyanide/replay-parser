@@ -1,6 +1,7 @@
 //! wows-render <replay.wowsreplay | -> --out <file.mp4 | -> --data <dir>
-//!             [--duration 30] [--fps 30] [--width 1080] [--height 720]
-//!             [--progress json] [--frames <dir> [--every N]]
+//!             [--speed 32 | --duration <s>] [--max-mb 8] [--fps 30]
+//!             [--width 1080] [--height 720] [--progress json]
+//!             [--frames <dir> [--every N]]
 //!
 //! `-` reads the replay from stdin / writes the MP4 to stdout. With
 //! `--progress json`, stderr carries one JSON object per line:
@@ -39,7 +40,9 @@ fn parse() -> Result<Args, String> {
         match a.as_str() {
             "--out" | "-o" => out = Some(val("--out")?),
             "--data" => data = Some(PathBuf::from(val("--data")?)),
-            "--duration" => opts.duration = num(val("--duration")?, "--duration")?,
+            "--duration" => opts.duration = Some(num(val("--duration")?, "--duration")?),
+            "--speed" => opts.speed = num(val("--speed")?, "--speed")?,
+            "--max-mb" => opts.max_bytes = (num(val("--max-mb")?, "--max-mb")? as f64 * 1e6) as u64,
             "--fps" => opts.fps = num(val("--fps")?, "--fps")? as u32,
             "--width" => opts.width = num(val("--width")?, "--width")? as u32,
             "--height" => opts.height = num(val("--height")?, "--height")? as u32,
@@ -84,7 +87,7 @@ fn main() {
 }
 
 const USAGE: &str = "usage: wows-render <replay.wowsreplay | -> --out <file.mp4 | -> --data <dir>
-       [--duration 30] [--fps 30] [--width 1080] [--height 720] [--progress json]
+       [--speed 32 | --duration <s>] [--max-mb 8] [--fps 30] [--width 1080] [--height 720] [--progress json]
        [--frames <png dir> [--every 30]] [--no-hold]";
 
 fn run(a: Args) -> Result<(), RenderError> {
@@ -113,13 +116,20 @@ fn run(a: Args) -> Result<(), RenderError> {
         a.opts.validate()?;
         std::fs::create_dir_all(dir)?;
         let mut n = 0u32;
-        let summary = replay_render::scene::render(&bytes, &data, &a.opts, &mut progress, &mut |pm| {
-            if n.is_multiple_of(a.every) {
-                pm.save_png(dir.join(format!("frame-{n:05}.png"))).map_err(|e| RenderError::Internal(e.to_string()))?;
-            }
-            n += 1;
-            Ok(())
-        })?;
+        let summary = replay_render::scene::render(
+            &bytes,
+            &data,
+            &a.opts,
+            &mut progress,
+            &mut |pm: &replay_render::tiny_skia::Pixmap| {
+                if n.is_multiple_of(a.every) {
+                    pm.save_png(dir.join(format!("frame-{n:05}.png")))
+                        .map_err(|e| RenderError::Internal(e.to_string()))?;
+                }
+                n += 1;
+                Ok(())
+            },
+        )?;
         (0, summary)
     } else {
         let (mp4, summary) = replay_render::render_mp4(&bytes, &data, &a.opts, &mut progress)?;

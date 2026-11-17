@@ -89,6 +89,9 @@ switch (mode) {
   case "bad_replay":
     fail("bad_replay", "truncated replay");
     break;
+  case "too_large":
+    fail("too_large", "the video would be 9000000 bytes, over the 8000000-byte limit");
+    break;
   case "weird_code":
     fail("something_new", "huh");
     break;

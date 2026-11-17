@@ -21,13 +21,19 @@ events).
   kill/capture event feed. Embedded font: Inter (SIL OFL 1.1,
   `render/assets/Inter-OFL.txt`).
 - **Timing**: the pre-battle countdown is skipped; the battle up to a few
-  seconds after the result is sampled evenly into the video (×15–×37 on the
-  fixtures for 30 s); the final frame is held for 1.5 s.
+  seconds after the result plays at ×32 (a 20-minute battle → 37.5 s; the
+  fixtures give 15–34 s), capped at 90 s by raising the speed; the final
+  frame is held for 1.5 s. `--duration` fixes the length instead.
+- **Size cap**: `--max-mb` (default 8 MB, under Discord's free limit) sets
+  the bitrate from the video's length; if the result still exceeds it, one
+  re-render at a lower bitrate follows, else the error `too_large`. On the
+  fixtures at ×32 the videos are 2.0–6.0 MB.
 - **Video** (`encode/`, crate `wows-replay-encode`): H.264 Main profile,
   yuv420p BT.709, MP4 with `moov` first, no ffmpeg at runtime (Cisco
   OpenH264 built from source + a hand-written muxer). Measured on the
-  fixtures at 1080×720, 30 fps, 30 s: 3.2–3.5 MB, 15–18 s per replay in
-  total (about 7–8 s of it encoding), decodes with zero ffmpeg errors.
+  fixtures at 1080×720, 30 fps: 4–14 s per replay in total (encoding runs
+  on its own thread, overlapping rendering: about 13.6 ms per frame against
+  20.3 ms before), decodes with zero ffmpeg errors.
 - **Encoder choice** (built twice, independently): both used OpenH264 and a
   hand-written muxer; on the same 900 real frames of two replays, version A
   (own GOP-level rate control, screen-content mode) scored +1.4 dB PSNR over
@@ -46,7 +52,7 @@ events).
   deserializable; one clippy fix; 15.9 entity defs added to the fixture fetch.
 - **Tests**: `render/tests/render.rs` renders all 7 fixtures (frame count,
   battle span, frames change, sidebar painted), loads a data pack, and checks
-  the unsupported-version error, and encodes a short MP4. Workspace: 41 Rust
+  the unsupported-version error, and encodes a short MP4. Workspace: 43 Rust
   tests pass (including the encoder's ffprobe/ffmpeg checks), clippy clean.
 
 ## Blocked here, needs a game install (🖥)
@@ -84,8 +90,6 @@ events).
 - **Label overlap** on crowded maps: names are not de-collided.
 - **Sidebar density** for large battles (Operations, 12 v 12 plus bots): the
   lineup rows shrink to fit, events show only the newest that fit.
-- **Discord upload limit**: check output size against the server's limit in
-  the bot; the CLI has no size target option yet.
 - **Suite parity**: the suite's sidebar (`ReplayEventsPanel`) is on the
   suite's `prototype` branch; if it changes, mirror it in `render/src/sidebar.rs`.
 - **Node addon**: the wrapper spawns the CLI (simple, isolates crashes). An
@@ -98,8 +102,6 @@ events).
   (the build does not warn). Cisco's H.264 patent coverage applies to its
   prebuilt binaries only, not to builds from source; check this before any
   public distribution.
-- **Encode speed**: encoding runs after each frame on one thread; running it
-  on a second thread would overlap rendering and encoding (~40% faster).
 
 ## Notes
 

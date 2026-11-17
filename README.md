@@ -28,7 +28,9 @@ cargo build --release -p wows-replay-render
 ./target/release/wows-render replay.wowsreplay --out battle.mp4 --data <data dir>
 ```
 
-Options: `--duration 30` (the battle is sped up to fit), `--fps 30`,
+Options: `--speed 32` (default; the video lasts the battle / 32, at most
+90 s) or `--duration <s>` (fixed length), `--max-mb 8` (size cap; the bitrate
+follows from it, error `too_large` if it cannot be met), `--fps 30`,
 `--width 1080 --height 720` (square map at full height, sidebar in the
 rest), `--progress json` (machine-readable progress and errors on stderr; see
 `bindings/node/README.md`), `-` for stdin/stdout, and `--frames <dir>

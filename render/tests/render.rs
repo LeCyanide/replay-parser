@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 use replay_render::DataDir;
 use replay_render::RenderOptions;
+use replay_render::tiny_skia::Pixmap;
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf()
@@ -34,7 +35,7 @@ fn fixture(part: &str) -> Vec<u8> {
 }
 
 fn small() -> RenderOptions {
-    RenderOptions { width: 600, height: 360, fps: 4, duration: 5.0, hold_end: true }
+    RenderOptions { width: 600, height: 360, fps: 4, duration: Some(5.0), ..RenderOptions::default() }
 }
 
 #[test]
@@ -46,7 +47,7 @@ fn renders_every_fixture() {
         let path = f.unwrap().path();
         let bytes = std::fs::read(&path).unwrap();
         let mut frames = Vec::new();
-        let summary = replay_render::scene::render(&bytes, &data, &small(), &mut |_| {}, &mut |pm| {
+        let summary = replay_render::scene::render(&bytes, &data, &small(), &mut |_| {}, &mut |pm: &Pixmap| {
             frames.push(pm.clone());
             Ok(())
         })
@@ -96,7 +97,7 @@ fn game_data_names_ships() {
     let gd = data.game_data(&v).unwrap().expect("pack found by version");
     let unique: std::collections::HashSet<i64> = replay.meta.vehicles.iter().map(|v| v.ship_id).collect();
     assert_eq!(gd.gameparams.ships.len(), unique.len());
-    let summary = replay_render::scene::render(&bytes, &data, &small(), &mut |_| {}, &mut |_| Ok(())).unwrap();
+    let summary = replay_render::scene::render(&bytes, &data, &small(), &mut |_| {}, &mut |_: &Pixmap| Ok(())).unwrap();
     assert!(summary.warnings.iter().all(|w| !w.contains("GameParams")), "{:?}", summary.warnings);
 }
 
@@ -104,10 +105,15 @@ fn game_data_names_ships() {
 fn unknown_version_is_reported() {
     let dir = std::env::temp_dir().join(format!("wows-render-empty-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let err =
-        replay_render::scene::render(&fixture("Faroe"), &DataDir::new(&dir), &small(), &mut |_| {}, &mut |_| Ok(()))
-            .err()
-            .expect("no defs");
+    let err = replay_render::scene::render(
+        &fixture("Faroe"),
+        &DataDir::new(&dir),
+        &small(),
+        &mut |_| {},
+        &mut |_: &Pixmap| Ok(()),
+    )
+    .err()
+    .expect("no defs");
     assert_eq!(err.code(), "unsupported_version");
 }
 
@@ -121,7 +127,7 @@ fn rejects_odd_sizes() {
 #[test]
 fn renders_an_mp4() {
     let data = DataDir::new(data_dir("mp4"));
-    let opts = RenderOptions { width: 720, height: 480, fps: 10, duration: 4.0, hold_end: true };
+    let opts = RenderOptions { width: 720, height: 480, fps: 10, duration: Some(4.0), ..RenderOptions::default() };
     let mut stages = Vec::new();
     let (mp4, summary) =
         replay_render::render_mp4(&fixture("Utrecht"), &data, &opts, &mut |p| stages.push(p.stage)).unwrap();
@@ -135,4 +141,42 @@ fn renders_an_mp4() {
     for s in [Parse, Simulate, Render, Encode] {
         assert!(stages.contains(&s), "{s:?} reported");
     }
+}
+
+#[test]
+fn speed_sets_the_length() {
+    // At ×32 the video lasts the battle / 32, plus the 1.5 s hold.
+    let data = DataDir::new(data_dir("speed"));
+    let opts = RenderOptions { width: 600, height: 360, fps: 4, speed: 32.0, ..RenderOptions::default() };
+    let mut plan = None;
+    struct Sink<'a>(&'a mut Option<replay_render::scene::Plan>);
+    impl replay_render::scene::FrameSink for Sink<'_> {
+        fn begin(&mut self, p: &replay_render::scene::Plan) -> Result<(), replay_render::RenderError> {
+            *self.0 = Some(*p);
+            Ok(())
+        }
+        fn frame(&mut self, _: &Pixmap) -> Result<(), replay_render::RenderError> {
+            Ok(())
+        }
+    }
+    let summary =
+        replay_render::scene::render(&fixture("Utrecht"), &data, &opts, &mut |_| {}, &mut Sink(&mut plan)).unwrap();
+    let plan = plan.expect("begin called");
+    assert_eq!(plan.frames, summary.frames);
+    assert!((summary.speed - 32.0).abs() < 0.5, "{}", summary.speed);
+    let expect = summary.battle_seconds / 32.0 + 1.5;
+    assert!((plan.seconds - expect).abs() < 0.5, "{} vs {expect}", plan.seconds);
+}
+
+#[test]
+fn stays_under_the_size_limit() {
+    let data = DataDir::new(data_dir("size"));
+    let max = 600_000;
+    let opts = RenderOptions { width: 720, height: 480, fps: 15, max_bytes: max, ..RenderOptions::default() };
+    let (mp4, _) = replay_render::render_mp4(&fixture("Utrecht"), &data, &opts, &mut |_| {}).unwrap();
+    assert!(mp4.len() as u64 <= max, "{} > {max}", mp4.len());
+    // An impossible limit is an error, not an oversized file.
+    let tiny = RenderOptions { max_bytes: 200_000, ..opts };
+    let err = replay_render::render_mp4(&fixture("Utrecht"), &data, &tiny, &mut |_| {}).err().expect("too small");
+    assert_eq!(err.code(), "too_large");
 }

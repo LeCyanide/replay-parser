@@ -26,7 +26,9 @@ test("file input -> stdout returns an mp4 Buffer and passes the CLI contract arg
     ...base,
     input: "/replays/a.wowsreplay",
     binary: bin("ok"),
+    speed: 16,
     duration: 12,
+    maxMb: 6.5,
     fps: 24,
     width: 640,
     height: 360,
@@ -38,7 +40,7 @@ test("file input -> stdout returns an mp4 Buffer and passes the CLI contract arg
   assert.deepEqual(r.warnings, []);
   assert.deepEqual(receivedArgs(r.mp4), [
     "/replays/a.wowsreplay", "--out", "-", "--data", "/data",
-    "--duration", "12", "--fps", "24", "--width", "640", "--height", "360",
+    "--speed", "16", "--duration", "12", "--max-mb", "6.5", "--fps", "24", "--width", "640", "--height", "360",
     "--progress", "json",
   ]);
 });
@@ -170,6 +172,9 @@ test("CLI error JSON becomes a typed RenderError", async () => {
       return true;
     },
   );
+  await assert.rejects(renderReplay({ ...base, input: "a", binary: bin("too_large") }), {
+    code: "too_large",
+  });
   await assert.rejects(renderReplay({ ...base, input: "a", binary: bin("bad_replay") }), {
     code: "bad_replay",
   });

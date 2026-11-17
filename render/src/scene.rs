@@ -1,6 +1,7 @@
 //! Runs the battle and samples it into frames: a first pass learns the
 //! battle's span and shell flight times, a second paints frames at evenly
-//! spaced battle times so the whole battle fits the requested duration.
+//! spaced battle times — at a fixed speed-up (×32 by default), or spread
+//! over a requested duration.
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -26,6 +27,37 @@ use crate::paint::Class;
 use crate::sidebar::*;
 use crate::text::Text;
 
+/// What the second pass will produce, known before its first frame.
+#[derive(Clone, Copy, Debug)]
+pub struct Plan {
+    pub frames: u32,
+    pub fps: u32,
+    /// Video length in seconds (`frames / fps`).
+    pub seconds: f32,
+    pub battle_seconds: f32,
+    pub speed: f32,
+}
+
+/// Receives the frames. Any `FnMut(&Pixmap) -> Result<(), RenderError>`
+/// is one; implement [`FrameSink::begin`] to learn the [`Plan`] first.
+pub trait FrameSink {
+    fn begin(&mut self, _plan: &Plan) -> Result<(), RenderError> {
+        Ok(())
+    }
+    fn frame(&mut self, pm: &Pixmap) -> Result<(), RenderError>;
+}
+
+impl<F: FnMut(&Pixmap) -> Result<(), RenderError>> FrameSink for F {
+    fn frame(&mut self, pm: &Pixmap) -> Result<(), RenderError> {
+        self(pm)
+    }
+}
+
+/// Longest video a speed-up may produce before the speed is raised to fit.
+pub const MAX_SECONDS: f32 = 90.0;
+/// Final frame hold, seconds.
+const HOLD_SECONDS: f32 = 1.5;
+
 pub struct Summary {
     pub frames: u32,
     pub warnings: Vec<String>,
@@ -49,7 +81,7 @@ pub fn render(
     data: &DataDir,
     opts: &RenderOptions,
     progress: &mut dyn FnMut(Progress),
-    sink: &mut dyn FnMut(&Pixmap) -> Result<(), RenderError>,
+    sink: &mut dyn FrameSink,
 ) -> Result<Summary, RenderError> {
     let mut warnings = Vec::new();
     progress(Progress { stage: Stage::Parse, done: 0, total: 1 });
@@ -158,11 +190,24 @@ pub fn render(
     let layer = MapLayer::new(map_px, map.as_ref().map(|m| m.png.as_slice()));
     let painter = SidebarPainter::default();
     let mut text = Text::new();
-    let total = (opts.duration * opts.fps as f32).round().max(2.0) as u32;
-    let hold = if opts.hold_end { (opts.fps as f32 * 1.5) as u32 } else { 0 }.min(total / 5);
-    let moving = total - hold;
+    let fps = opts.fps as f32;
     let battle = span.end - span.start;
-    let speed = battle / (moving as f32 / opts.fps as f32);
+    let hold = if opts.hold_end { (fps * HOLD_SECONDS) as u32 } else { 0 };
+    let moving = match opts.duration {
+        // The whole video, hold included, lasts `duration`.
+        Some(d) => ((d * fps).round() as u32).saturating_sub(hold),
+        None => ((battle / opts.speed).min(MAX_SECONDS) * fps).round() as u32,
+    }
+    .max(2);
+    let total = moving + hold;
+    let speed = battle / (moving as f32 / fps);
+    if opts.duration.is_none() && speed > opts.speed * 1.01 {
+        warnings.push(format!(
+            "the battle is long: sped up ×{speed:.0} instead of ×{} to stay under {MAX_SECONDS} s",
+            opts.speed
+        ));
+    }
+    sink.begin(&Plan { frames: total, fps: opts.fps, seconds: total as f32 / fps, battle_seconds: battle, speed })?;
     let at = |k: u32| span.start + battle * k as f32 / (moving - 1).max(1) as f32;
 
     let mut decoder = EntityDecoder::new(&defs);
@@ -191,7 +236,7 @@ pub fn render(
         world.apply(&decoder, &p, event.as_ref());
         while k < moving && world.clock >= at(k) {
             paint_frame(&world, at(k), &mut frame, &mut cap_events, &mut caps_seen);
-            sink(&frame)?;
+            sink.frame(&frame)?;
             k += 1;
             progress(Progress { stage: Stage::Render, done: k, total });
         }
@@ -201,12 +246,12 @@ pub fn render(
     }
     while k < moving {
         paint_frame(&world, at(k), &mut frame, &mut cap_events, &mut caps_seen);
-        sink(&frame)?;
+        sink.frame(&frame)?;
         k += 1;
         progress(Progress { stage: Stage::Render, done: k, total });
     }
     for _ in 0..hold {
-        sink(&frame)?;
+        sink.frame(&frame)?;
         k += 1;
         progress(Progress { stage: Stage::Render, done: k, total });
     }

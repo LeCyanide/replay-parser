@@ -26,8 +26,8 @@ import { renderReplay, RenderError, supportedVersions } from "@tactics/wows-rend
 const result = await renderReplay({
   input: "/replays/match.wowsreplay",   // or a Buffer / Uint8Array (sent via stdin)
   dataDir: "/srv/wows-data",
-  duration: 30,
-  fps: 30,
+  speed: 32,     // default: a 20-minute battle becomes 37.5 s
+  maxMb: 8,      // default: the MP4 never exceeds 8 MB
   onProgress: (p) => console.log(p.stage, p.done, p.total),
   signal: AbortSignal.timeout(180_000),
 });
@@ -35,7 +35,8 @@ const result = await renderReplay({
 ```
 
 Options: `input`, `output?`, `dataDir`, `binary?` (a path, or
-`[command, ...args]`), `duration?`, `fps?`, `width?`, `height?`, `onProgress?`,
+`[command, ...args]`), `speed?`, `duration?`, `maxMb?`, `fps?`, `width?`,
+`height?`, `onProgress?`,
 `signal?`, `timeoutMs?` (default 120000; `0` disables).
 Result: `{ mp4?, path?, frames, bytes, warnings }`.
 
@@ -62,17 +63,9 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     const r = await renderReplay({
       input: bytes,
       dataDir: process.env.WOWS_DATA_DIR!,
-      duration: 30,
+      maxMb: 8, // the CLI guarantees the cap, or fails with too_large
     });
 
-    // Check r.bytes against the upload limit of the guild (it depends on the
-    // server's boost level) before replying; if it is too big, re-render with a
-    // lower duration/width/height/fps, or host the file elsewhere.
-    const limit = interaction.guild?.maximumUploadLimit ?? 10 * 1024 * 1024; // verify for your discord.js version
-    if (r.bytes > limit) {
-      await interaction.editReply("The render is too large to upload. Try a shorter duration.");
-      return;
-    }
     await interaction.editReply({
       content: r.warnings.length ? `Warnings: ${r.warnings.join("; ")}` : undefined,
       files: [new AttachmentBuilder(r.mp4!, { name: "replay.mp4" })],
@@ -84,6 +77,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
         e.code === "unsupported_version" ? `This replay's game version is not supported: ${e.message}`
         : e.code === "bad_replay" ? "That file does not look like a valid replay."
         : e.code === "timeout" ? "Rendering took too long."
+        : e.code === "too_large" ? "This battle does not fit the upload size limit."
         : "Rendering failed.";
       await interaction.editReply(msg);
     } else {
@@ -106,6 +100,7 @@ lines) and `exitCode`.
 | `bad_replay` | replay unreadable or corrupt |
 | `missing_data` | data dir / required files missing (also thrown by `supportedVersions` when `defs/` is unreadable) |
 | `io` | I/O failure in the CLI, or output file missing after a clean exit |
+| `too_large` | the video cannot be made to fit `maxMb` (after one lower-bitrate retry) |
 | `internal` | any other CLI failure, including a non-zero exit with no error JSON and unknown CLI codes |
 | `timeout` | `timeoutMs` elapsed; child killed (SIGKILL) |
 | `aborted` | `signal` aborted; child killed |
