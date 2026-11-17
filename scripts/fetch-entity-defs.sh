@@ -7,7 +7,7 @@
 # one commit. On your own machine the same files come from the game install.
 set -euo pipefail
 REV=36e839ddc14213a797e2c0327829c5044583e7e4
-VERSIONS=(13_11_0 14_5_0 14_11_0 15_1_0 15_4_0 15_5_0)
+VERSIONS=(13_11_0 14_5_0 14_11_0 15_1_0 15_4_0 15_5_0 15_9_0)
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEST="$ROOT/tests/fixtures/scripts"
 TMP="$(mktemp -d)"

@@ -1,10 +1,54 @@
 # replay-parser
 
-A World of Warships replay parser for the Tactics Suite replay viewer, written
-to replace the suite's dependency on landaire's
-[wows-toolkit](https://github.com/landaire/wows-toolkit) crates.
+A World of Warships replay framework in Rust, independent of landaire's
+[wows-toolkit](https://github.com/landaire/wows-toolkit): it parses replays,
+simulates the battle, and renders it. Its users:
 
-## Scope: what is being replaced
+- the **Tactics Suite** replay viewer, whose sidecar bakes timelines with the
+  parser crate (draw commands; the suite paints them);
+- the **Discord bot**, which turns a replay into a ~30 s MP4 of the minimap
+  with a battle sidebar, through `wows-render` and its Node wrapper;
+- anything else, through the library crates.
+
+| Part | Path | What it is |
+|---|---|---|
+| `wows-replay-parser` | `src/` | container, packets, entity decoding, game files, GameParams, battle world, draw commands; `replay-dump` CLI |
+| `wows-replay-render` | `render/` | frames (map layer + sidebar) and H.264 MP4; `wows-render` CLI |
+| `@tactics/wows-render` | `bindings/node/` | TypeScript wrapper that runs `wows-render` for the bot |
+
+Open tasks and notes from the current round are in [`docs/STATUS.md`](docs/STATUS.md).
+
+## Rendering a replay
+
+```bash
+cargo build --release -p wows-replay-render
+./target/release/wows-render replay.wowsreplay --out battle.mp4 --data <data dir>
+```
+
+Options: `--duration 30` (the battle is sped up to fit), `--fps 30`,
+`--width 1080 --height 720` (square map at full height, sidebar in the
+rest), `--progress json` (machine-readable progress and errors on stderr; see
+`bindings/node/README.md`), `-` for stdin/stdout, and `--frames <dir>
+[--every N]` to write PNG stills instead of a video.
+
+The data directory:
+
+```text
+<data>/defs/<key>/            entity definitions (scripts/: entities.xml, entity_defs/) — required
+<data>/gameparams/<key>.json  GameParams extract and ship names — optional (without it: player names, cruiser marks)
+<data>/maps/maps.json         map images and sizes, in the suite's seed/maps format — optional (plain grid without)
+```
+
+`<key>` is the replay's build number or its version (`15_10_0`). Both
+GameParams-derived files come from a game install:
+
+```bash
+./target/release/replay-dump datapack <game dir> <data dir> [build] [15_10_0]
+```
+
+The suite's `seed/maps/` directory works as `<data>/maps` as it is.
+
+## Scope: what the parser replaced in the suite
 
 The suite already draws replays itself (`src/canvas/ReplayLayer.tsx`). What
 it takes from landaire is everything upstream of drawing, inside the Rust
@@ -250,6 +294,13 @@ area of interest. Enemies of the recording player are flagged spotted
 over 90% of their time in view and under 2% out of it, on every fixture.
 Every consumable type used at least 3 times both before and after 15.4
 shares a work time across the two encodings (at least 3 types compared).
+
+The renderer (`render/tests/render.rs`) renders every fixture at a small
+size: the right frame count, a battle span over 5 minutes sped up to fit,
+frames that change over the battle, and a painted sidebar; it also loads a
+GameParams data pack in `replay-dump datapack`'s format and checks the
+`unsupported_version` error. The Node wrapper has its own tests
+(`cd bindings/node && npm install && npm test`), run against a fake binary.
 
 The pickle reader is checked against CPython on `tests/pickle_corpus.json`
 (regenerate with `python3 -I scripts/gen-pickle-corpus.py`).

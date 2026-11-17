@@ -16,6 +16,12 @@
 //!       one JSON line of draw commands per second of game clock
 //!   replay-dump res <game dir> [path]
 //!       list the newest build's packaged files, or write one to stdout
+//!   replay-dump datapack <game dir> <out dir> [build] [key]
+//!       writes what wows-render needs for one build (default: the newest)
+//!       into a data directory: <out>/defs/<key>/ (entity definitions) and
+//!       <out>/gameparams/<key>.json (GameParams extract and ship names).
+//!       <key> defaults to the build number; name it after the version
+//!       (15_10_0) to serve every regional build of it.
 
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -52,7 +58,8 @@ fn main() {
     let (Some(cmd), Some(path)) = (args.first(), args.get(1)) else {
         eprintln!(
             "usage: replay-dump <meta|stats|packets> <file.wowsreplay>\n       replay-dump <entities|events|world> <file.wowsreplay> <scripts dir>
-       replay-dump draw <file.wowsreplay> <game dir>\n       replay-dump res <game dir> [path]"
+       replay-dump draw <file.wowsreplay> <game dir>\n       replay-dump res <game dir> [path]
+       replay-dump datapack <game dir> <out dir> [build] [key]"
         );
         std::process::exit(2);
     };
@@ -63,6 +70,16 @@ fn main() {
 }
 
 fn run(cmd: &str, path: &std::path::Path, scripts: Option<&std::path::Path>) -> Result<(), Box<dyn std::error::Error>> {
+    if cmd == "datapack" {
+        let out = scripts.ok_or("needs an output directory")?;
+        let rest: Vec<String> = std::env::args().skip(4).collect();
+        let res = match rest.first() {
+            Some(b) => replay_parser::res::Resources::open_build(path, b.parse()?)?,
+            None => replay_parser::res::Resources::open(path)?,
+        };
+        let key = rest.get(1).cloned().unwrap_or_else(|| res.build().to_string());
+        return datapack(&res, out, &key);
+    }
     if cmd == "res" {
         let res = replay_parser::res::Resources::open(path)?;
         match scripts.and_then(|p| p.to_str()) {
@@ -208,6 +225,46 @@ fn run(cmd: &str, path: &std::path::Path, scripts: Option<&std::path::Path>) -> 
 
 /// Entity defs from a loose `scripts/` directory, or from a game install
 /// (a directory with `bin/`), using the build that recorded the replay.
+/// Entity definitions and a GameParams extract for one build; see the
+/// module docs.
+fn datapack(
+    res: &replay_parser::res::Resources,
+    out: &std::path::Path,
+    key: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let defs = out.join("defs").join(key);
+    let mut n = 0;
+    for p in res.paths() {
+        let Some(rel) = p.strip_prefix("scripts/") else { continue };
+        if rel != "entities.xml" && !rel.starts_with("entity_defs/") {
+            continue;
+        }
+        let dest = defs.join(rel);
+        std::fs::create_dir_all(dest.parent().ok_or("bad path")?)?;
+        std::fs::write(&dest, res.read(p)?)?;
+        n += 1;
+    }
+    // Checks the copy loads before anything relies on it.
+    EntityDefs::load(&ScriptDir(defs.clone()))?;
+    let gp = replay_parser::gameparams::GameParams::load(res)?;
+    let catalog = res.catalog("en")?;
+    let names: BTreeMap<String, String> = gp
+        .ships
+        .values()
+        .filter_map(|s| {
+            let k = format!("IDS_{}", s.index);
+            Some((k.clone(), catalog.get(&k)?.clone()))
+        })
+        .collect();
+    let json = serde_json::json!({ "build": res.build(), "gameparams": gp, "names": names });
+    let gp_dir = out.join("gameparams");
+    std::fs::create_dir_all(&gp_dir)?;
+    let path = gp_dir.join(format!("{key}.json"));
+    std::fs::write(&path, serde_json::to_vec(&json)?)?;
+    eprintln!("{n} definition files in {}, {} ships in {}", defs.display(), names.len(), path.display());
+    Ok(())
+}
+
 fn load_defs(dir: &std::path::Path, version: replay_parser::Version) -> Result<EntityDefs, Box<dyn std::error::Error>> {
     if dir.join("bin").is_dir() {
         let res = replay_parser::res::Resources::open_build(dir, version.build)

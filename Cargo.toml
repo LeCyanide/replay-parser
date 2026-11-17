@@ -1,9 +1,12 @@
+[workspace]
+members = [".", "render"]
+
 [package]
 name = "wows-replay-parser"
 version = "0.1.0"
 edition = "2024"
 license = "GPL-3.0-only"
-description = "World of Warships replay parser: container, packet stream, and (later) entity decoding"
+description = "World of Warships replay parser: container, packets, entities, battle simulation and draw commands"
 publish = false
 
 [lib]

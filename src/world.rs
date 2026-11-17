@@ -326,6 +326,8 @@ pub struct World {
     pub battle_stage: Option<i64>,
     /// Indexed by team id.
     pub scores: Vec<i64>,
+    /// Score that wins the battle (`state.missions.teamWinScore`).
+    pub win_score: Option<i64>,
     pub winner: Option<i64>,
     pub players: Vec<Player>,
     pub ships: BTreeMap<u32, Ship>,
@@ -678,10 +680,8 @@ impl World {
                     self.smokes.remove(entity_id);
                 }
                 // Buff zones go when picked up; capture points stay.
-                "InteractiveZone" => {
-                    if self.caps.get(entity_id).is_some_and(|c| c.index < 0) {
-                        self.caps.remove(entity_id);
-                    }
+                "InteractiveZone" if self.caps.get(entity_id).is_some_and(|c| c.index < 0) => {
+                    self.caps.remove(entity_id);
                 }
                 _ => {}
             },
@@ -1060,6 +1060,8 @@ impl World {
                 if let Some(Value::List(teams)) = teams {
                     self.scores = teams.iter().map(|t| i64_of(t.get("score")).unwrap_or(0)).collect();
                 }
+                let missions = prop("state").and_then(|s| s.get("missions"));
+                self.win_score = i64_of(missions.and_then(|m| m.get("teamWinScore"))).or(self.win_score);
                 let drops = prop("state").and_then(|s| s.get("drop")).and_then(|d| d.get("data"));
                 for d in list(drops) {
                     if let (Some(zone), Some(params)) = (i64_of(d.get("zoneId")), i64_of(d.get("paramsId"))) {

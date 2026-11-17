@@ -12,6 +12,7 @@
 use std::collections::HashMap;
 use std::io::Read;
 
+use serde::Deserialize;
 use serde::Serialize;
 
 use crate::pickle;
@@ -27,7 +28,7 @@ pub enum GameParamsError {
     Layout(&'static str),
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ShipParams {
     pub id: i64,
     /// `PJSD207`; the ship's display name is `IDS_<index>` in the catalogue.
@@ -46,7 +47,7 @@ pub struct ShipParams {
 
 /// One variant of an ability (`PCY019_RLSSearch` / `USSR_10`), base values
 /// before upgrades and commander skills.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ConsumableParams {
     /// `rls`, `sonar`, `crashCrew`, …; see `consumable_type` for the id
     /// replays use.
@@ -82,7 +83,7 @@ pub fn consumable_type(id: i64) -> Option<&'static str> {
     })
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProjectileParams {
     pub id: i64,
     pub index: String,
@@ -100,7 +101,7 @@ pub struct ProjectileParams {
     pub caliber: Option<f32>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AircraftParams {
     pub id: i64,
     pub index: String,
@@ -114,7 +115,7 @@ pub struct AircraftParams {
     pub ammo_type: String,
 }
 
-#[derive(Clone, Debug, Default, Serialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct GameParams {
     pub ships: HashMap<i64, ShipParams>,
     pub projectiles: HashMap<i64, ProjectileParams>,
