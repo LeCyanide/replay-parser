@@ -46,7 +46,8 @@ The map (left, square):
   in-game minimap;
 - ships as class icons in the team colour (allies `#4CE8AA`, enemies
   `#FE4D2A`), heading-rotated, with a fading trail; ships out of sight
-  faded, wrecks where they sank; the recording player's ship slightly
+  faded, wrecks where they sank with their name in grey (where it fits
+  after the live ships' names); the recording player's ship slightly
   larger;
 - a gold ring outside the icon on allies (and the recording player) while
   the enemy spots them;
