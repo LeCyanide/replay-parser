@@ -46,7 +46,8 @@ The map (left, square):
   in-game minimap;
 - ships as class icons in the team colour (allies `#4CE8AA`, enemies
   `#FE4D2A`), heading-rotated, with a fading trail; ships out of sight
-  faded, wrecks where they sank; the recording player's ship slightly
+  faded, wrecks where they sank with their name in grey (where it fits
+  after the live ships' names); the recording player's ship slightly
   larger;
 - a gold ring outside the icon on allies (and the recording player) while
   the enemy spots them;
@@ -121,7 +122,7 @@ alone. Next is putting the renderer in front of people — the Discord bot
 and the suite — then keeping up with game patches. `docs/INTEGRATION.md` is
 the brief for steps 1 and 2.
 
-1. **Discord bot: `/render`** ☁ (wows-tactics-bot) — a slash command that
+1. **Discord bot: `/render`** ☁ (wows-suite-bot) — a slash command that
    takes a `.wowsreplay` and answers with the MP4, through
    `bindings/node`. Deploy: the binary and a data directory on the VPS.
 2. **Suite** ☁ (tactics-suite) — merge the sidecar cut-over (its branch

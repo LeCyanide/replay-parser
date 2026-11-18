@@ -22,6 +22,8 @@ const SPOTTED_OUTLINE: Rgb = [0xf5, 0xc8, 0x4c];
 const LABEL: Rgb = [0xe8, 0xee, 0xf6];
 /// Names of players whose client has dropped.
 const DISCONNECTED: Rgb = [0xff, 0x9f, 0x1c];
+/// Names on wrecks: grey, so they read as history rather than a ship in play.
+const WRECK_LABEL: Rgb = [0x9a, 0xa4, 0xb0];
 /// Shell streaks; the front of each streak takes the ammo type's colour.
 const TRACER: Rgb = [0xff, 0xd0, 0x4a];
 const TRACER_AP: Rgb = [0xff, 0xff, 0xff];
@@ -246,7 +248,7 @@ impl MapLayer {
                     rect(pm, bx, by, w * fraction.clamp(0.0, 1.0), h, *fill_color, 1.0);
                     marks.push(Rect { x0: bx, y0: by, x1: bx + w, y1: by + h });
                 }
-                Draw::DeadShip { entity_id, pos, yaw, species, is_self, .. } => {
+                Draw::DeadShip { entity_id, pos, yaw, species, is_self, player_name, ship_name } => {
                     let [x, y] = p(*pos);
                     let fill = if *is_self { ALLY } else { side_color(*entity_id) };
                     self.glyphs.draw(
@@ -262,6 +264,18 @@ impl MapLayer {
                             outline: None,
                         },
                     );
+                    if let Some(l) = ship_name.as_deref().or(*player_name).map(|n| n.trim_matches(':')) {
+                        labels.push(NameLabel {
+                            text: l.to_owned(),
+                            x,
+                            y,
+                            color: WRECK_LABEL,
+                            alpha: 0.6,
+                            detected: false,
+                            is_self: false,
+                            wreck: true,
+                        });
+                    }
                 }
                 Draw::Ship {
                     pos,
@@ -297,6 +311,7 @@ impl MapLayer {
                             alpha: (alpha + 0.25).min(1.0),
                             detected: *detected,
                             is_self: *is_self,
+                            wreck: false,
                         });
                     }
                 }
@@ -390,14 +405,18 @@ struct NameLabel {
     alpha: f32,
     detected: bool,
     is_self: bool,
+    /// A sunk ship's name: placed after every live ship's, and dropped where
+    /// it does not fit.
+    wreck: bool,
 }
 
 /// Draws ship names after every mark, each at the first free spot of: below
 /// the ship, above its health bar, right, left. Names that fit nowhere are
 /// dropped for ships out of sight and drawn faded below for ships in sight.
-/// The recording player's ship is placed first, then ships in sight.
+/// The recording player's ship is placed first, then ships in sight, then
+/// ships out of sight, then wrecks.
 fn place_labels(pm: &mut Pixmap, text: &mut Text, mut labels: Vec<NameLabel>, marks: &[Rect], ship: f32, px: f32) {
-    labels.sort_by_key(|l| (!l.is_self, !l.detected));
+    labels.sort_by_key(|l| (!l.is_self, !l.detected, l.wreck));
     let cap = text.cap_height(px);
     let pad = px * 0.15;
     let mut placed: Vec<Rect> = Vec::new();

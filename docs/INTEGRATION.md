@@ -10,7 +10,7 @@ to start from).
 | Repo | State |
 | --- | --- |
 | `LeCyanide/replay-parser` (this) | Parser, `wows-render` CLI, MP4 encoder, Node wrapper (`bindings/node`, `@tactics/wows-render`) on `main`. PR 2 (`claude/render-cosmetics`, render looks) open; merge it first or branch from it. |
-| `LeCyanide/wows-tactics-bot` | discord.js 14, Node, TypeScript bundled with esbuild to `dist/bot.js`, SQLite, systemd on a VPS behind Caddy. **No replay code yet.** Commands live in `src/commands/` (one file each, listed in `src/commands/index.ts`, registered with `npm run register`). |
+| `LeCyanide/wows-suite-bot` | discord.js 14, Node, TypeScript bundled with esbuild to `dist/bot.js`, SQLite, systemd on a VPS behind Caddy. **No replay code yet.** Commands live in `src/commands/` (one file each, listed in `src/commands/index.ts`, registered with `npm run register`). |
 | `LeCyanide/tactics-suite` | Electron app. Its replay viewer bakes replays with a Rust sidecar (`sidecar/`). The cut-over of that sidecar to this parser is on branch `claude/keen-hawking-k8h8pf` (commit 530a14f), pushed, **no PR yet**; `main` still uses the old toolkit crates. |
 
 Verified locally on 2026-11-17: `replay-dump datapack` against a live install
@@ -87,3 +87,92 @@ Linux.
 - Never commit game files (defs, GameParams, maps, `battle_hud` icons) or
   other players' replays.
 - One branch and PR per repo; don't merge without the owner.
+
+## Progress (2026-11-18, cloud session)
+
+Owner decisions taken this round: `/render` is open to every member and
+answers publicly (refusals before the download stay private); the suite PR
+comes from `claude/festive-einstein-a1jjmn`; "Export video" (§2.4) is not
+built now.
+
+### Done
+
+- **Bot `/render`**: [LeCyanide/wows-suite-bot#1](https://github.com/LeCyanide/wows-suite-bot/pull/1)
+  (draft). Steps 1–5 above:
+  - wrapper vendored as `src/render/wows-render.ts` from `bindings/node`
+    (8466aba, unchanged at 7855113). One change: a constructor parameter
+    property became a field, because the bot's `npm run dev` runs `.ts`
+    through Node's type stripping, which cannot erase it. Keep
+    `bindings/node/src/index.ts` free of parameter properties, enums and
+    namespaces so it can be copied over as is.
+  - queue: 1 running, 3 waiting, 1 per member, 150 s timeout per render.
+    The worst case is 10 min, inside Discord's 15-minute window.
+  - the CLI's `unsupported_version` message holds the server's data path,
+    so the bot extracts only the version from it. If that message's wording
+    changes, the bot's regex (`failureMessage` in `src/render/replay.ts`)
+    must follow.
+  - typecheck clean, selftest 105/105 (8 new, fake binary). End to end
+    without Discord: 7 fixtures through the bot's download → queue →
+    wrapper path with the real release binary, 2.2–6.2 MB, 4.5–14 s each.
+    This was measured in the cloud container, not on the VPS.
+  - deploy steps for the owner are in the bot README (Deploying → The
+    renderer). Not done: the VPS install and `npm run register`.
+- **Suite §2.1**: [LeCyanide/tactics-suite#8](https://github.com/LeCyanide/tactics-suite/pull/8)
+  (draft). It carries keen-hawking's cut-over plus one commit: a git
+  dependency at rev 7855113 (main), `sidecar/.cargo/config.toml` with
+  `net.git-fetch-with-cli = true` (this repo is private), no sibling check,
+  and docs for bumping `rev` or patching in a local checkout. Built and
+  probed on Linux; the Windows GNU build is untested.
+
+### Open tasks
+
+| # | Task | Owner | Notes |
+| --- | --- | --- | --- |
+| 1 | Install `wows-render` and the data pack on the VPS, set the two env vars, `npm run register`, try `/render` in Discord | owner | Live Discord and the VPS were not testable here |
+| 2 | ~~Build the sidecar on Windows (`npm run build:sidecar`) from suite#8~~ | done 2026-11-18 | GNU toolchain, private git fetch via the machine's login, 15 s, 1.8 MB |
+| 3 | Suite §2.2: review [LeCyanide/tactics-suite#9](https://github.com/LeCyanide/tactics-suite/pull/9) (stacked on #8), ~~bake a real replay~~, ~~check the panel~~ | owner review | Real 15.10 bake done 2026-11-18 on Windows: 5884 frames in 4.6 s, `events` has kills with causes, roster, scores, health, `timeLimit`. The panel checked against it in `dev/app-preview.html`: score, caps, lineups, countdown, feed newest at the bottom. Not checked inside Electron (the IPC hop) |
+| 4 | Suite §2.3 sidebar parity: done in suite#9 (video sidebar is the reference) | owner review | Keep `render/src/sidebar.rs` and the suite's `ReplayEventsPanel` in step |
+| 5 | Measure render time and memory on the VPS; raise the queue to 2 if it has the cores | owner | `RenderQueue(1, 3)` in `src/commands/render.ts` |
+| 6 | Data pack after every patch; old-version fallback | owner / later | Unchanged from STATUS.md |
+| 7 | Suite §2.4 "Export video" | parked | Product decision; not built |
+| 8 | Kill icons in the suite: copy `gui/battle_hud/icon_frag/*.png` into the suite's `seed/battle_hud/icon_frag/` (code is in suite#9; words until then) | owner | The installer then ships them. The suite's notices say it redistributes no game files; reword them |
+| 9 | Optional: name placement with collision checks on the suite's map (the video's `place_labels`) | later | Without it, a wreck's name can sit under a live one in a dense cluster |
+
+**3. Death causes in the suite (done, suite#9).** `ReplayEventsPanel` (and its
+`causeLabel` table, toolkit `DeathCause` names) exists only on the suite's
+`prototype` branch. That branch's toolkit-based sidecar writes an `events`
+header block (kills with cause, roster, scores, caps, winner). The cut-over
+sidecar (keen-hawking, now suite#8) writes no `events` block, so the panel
+gets nothing on top of it. Adopting `replay_parser::constants` therefore
+means:
+(a) the sidecar emits `events` from the parser's world, with causes as
+`DEATH_REASON_NAME` strings via `constants::death_reason` (and the build's
+own table where `battle.xml` is available);
+(b) `causeLabel` maps those names (TORPEDO, TBOMB, BURNING, FLOOD, RAM,
+BOMB, SKIP_BOMB, ROCKET, DBOMB, ADBOMB, DETONATE, ATBA, SEA_MINE, …);
+(c) `prototype` merges with the cut-over.
+The owner chose a separate PR: [LeCyanide/tactics-suite#9](https://github.com/LeCyanide/tactics-suite/pull/9)
+(branch `claude/festive-einstein-a1jjmn-events`, based on #8's branch) merges
+`prototype`, adds `sidecar/src/events.rs` for (a), and updates `causeLabel`
+with the same words as `kill_verb` in `render/src/sidebar.rs` for (b). Keep
+the two in step. The fixture test passes (7 replays). A real bake and the
+panel in the app are untested. Bakes made on `prototype` with the toolkit
+keep toolkit cause names, which now read "sank"; delete them to rebake.
+
+**4. Parity (done, suite#9).** Owner decision: the video sidebar
+(`render/src/sidebar.rs`) is the reference, and the suite follows it within
+its fixed sidebar. The suite now has health bars, the banded recording
+player, faded and struck-through sunk ships, a "Battle events" feed with
+past events only, newest at the bottom, on the countdown clock, and caps
+in label order. The Playback panel's clock is also the countdown. The
+suite keeps on purpose: theme colours, trail toggles and seek, kill words
+instead of the game's kill icons, the map, mode and clock in the Playback
+panel, and wrapped event lines. The sidecar added `timeLimit`,
+`roster[].isSelf` and a `health` track to `header.events`. A change to
+either side should be mirrored in the other.
+
+**Wrecks and kill icons (2026-11-18).** Owner decisions: wrecks keep their
+name in grey on both maps (video b155e76: placed after live names, dropped
+where it does not fit; suite#9: under the wreck, following the name
+toggles). Kill icons ship in the suite's seed rather than being read from
+the install. Copying them in is the owner's step (task 8).
