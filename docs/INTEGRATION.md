@@ -136,7 +136,7 @@ built now.
 | 6 | Data pack after every patch; old-version fallback | owner / later | Pack: `scripts/build-data.sh` with the version key. If the patch needs parser changes: push them, let CI pass, install that run's `wows-render-linux` artifact on the VPS (`docs/DEPLOY.md`) |
 | 7 | Suite §2.4 "Export video" | parked | Product decision; not built |
 | 8 | Kill icons in the suite: copy `gui/battle_hud/icon_frag/*.png` into the suite's `seed/battle_hud/icon_frag/` (code is in suite#9; words until then) | owner | The installer then ships them. The suite's notices say it redistributes no game files; reword them |
-| 9 | Optional: name placement with collision checks on the suite's map (the video's `place_labels`) | later | Without it, a wreck's name can sit under a live one in a dense cluster |
+| 9 | ~~Name placement with collision checks on the suite's map~~ | dropped | Owner decision 2026-11-18: names sit under the ship in the video too, overlaps allowed; division mates in team colour |
 
 **3. Death causes in the suite (done, suite#9).** `ReplayEventsPanel` (and its
 `causeLabel` table, toolkit `DeathCause` names) exists only on the suite's

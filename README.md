@@ -46,8 +46,9 @@ The map (left, square):
   in-game minimap;
 - ships as class icons in the team colour (allies `#4CE8AA`, enemies
   `#FE4D2A`), heading-rotated, with a fading trail; ships out of sight
-  faded, wrecks where they sank with their name in grey (where it fits
-  after the live ships' names); the recording player's ship slightly
+  faded, wrecks where they sank with their name in grey; every name
+  centred under its ship, overlaps allowed; division mates in their team's
+  colour; the recording player's ship slightly
   larger;
 - a gold ring outside the icon on allies (and the recording player) while
   the enemy spots them;
@@ -282,9 +283,10 @@ The steps that replaced landaire's crates in the suite's sidecar.
    `state.weather.localWeather` changes and weather zone entities, which
    move by their position packets) match on every record of three replays
    (Atoll and an Operation with both, Greece with a moving storm).
-   Division mates are gold (the roster's `prebattleId`, at a
+   Division mates were gold (the roster's `prebattleId`, at a
    version-specific index; not in clan battles) on ships, tracers,
-   torpedoes and camera lines, matching on every record. Wrecks stay where
+   torpedoes and camera lines, matching on every record; since 2026-11-18
+   they are drawn in their team's colour. Wrecks stay where
    the ship died (its position if in view, else its minimap sighting),
    matching on every record of all seven replays. Two Greece differences
    are the toolkit's: it reads depth states from the game's

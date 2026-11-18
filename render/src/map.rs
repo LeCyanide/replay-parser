@@ -70,9 +70,6 @@ pub struct MapLayer {
     glyphs: Glyphs,
     // Ordered, so overlapping trails blend the same way every run.
     trails: std::collections::BTreeMap<u32, Trail>,
-    /// Where each ship's name sits, by entity id, so names hold still
-    /// between frames.
-    label_spots: std::collections::HashMap<u32, LabelSpot>,
 }
 
 impl MapLayer {
@@ -87,13 +84,7 @@ impl MapLayer {
         if grid {
             draw_grid(&mut bg, text);
         }
-        Self {
-            background: bg,
-            size,
-            glyphs: Glyphs::default(),
-            trails: std::collections::BTreeMap::new(),
-            label_spots: std::collections::HashMap::new(),
-        }
+        Self { background: bg, size, glyphs: Glyphs::default(), trails: std::collections::BTreeMap::new() }
     }
 }
 
@@ -153,7 +144,6 @@ impl MapLayer {
             (Some(_), Some(_)) => ENEMY,
             _ => NEUTRAL_FILL,
         };
-        let mut marks: Vec<Rect> = Vec::new();
         // The last streak drawn, for its head: (tail, head, width, alpha).
         let mut tracer: Option<([f32; 2], [f32; 2], f32, f32)> = None;
         let mut labels: Vec<NameLabel> = Vec::new();
@@ -255,7 +245,6 @@ impl MapLayer {
                     let (bx, by) = (x - w / 2.0, y - ship_size * 0.75);
                     rect(pm, bx, by, w, h, *background_color, *background_alpha);
                     rect(pm, bx, by, w * fraction.clamp(0.0, 1.0), h, *fill_color, 1.0);
-                    marks.push(Rect { x0: bx, y0: by, x1: bx + w, y1: by + h });
                 }
                 Draw::DeadShip { entity_id, pos, yaw, species, is_self, player_name, ship_name } => {
                     let [x, y] = p(*pos);
@@ -275,7 +264,6 @@ impl MapLayer {
                     );
                     if let Some(l) = ship_name.as_deref().or(*player_name).map(|n| n.trim_matches(':')) {
                         labels.push(NameLabel {
-                            id: *entity_id,
                             text: l.to_owned(),
                             x,
                             y,
@@ -288,7 +276,6 @@ impl MapLayer {
                     }
                 }
                 Draw::Ship {
-                    entity_id,
                     pos,
                     yaw,
                     species,
@@ -312,10 +299,8 @@ impl MapLayer {
                         &ShipMark { x, y, yaw: *yaw, class: Class::of(*species), size, fill, alpha, outline },
                     );
                     let label = ship_name.as_deref().or(*player_name).map(|n| n.trim_matches(':'));
-                    marks.push(Rect::around(x, y, size * 0.6));
                     if let Some(l) = label {
                         labels.push(NameLabel {
-                            id: *entity_id,
                             text: l.to_owned(),
                             x,
                             y,
@@ -329,7 +314,7 @@ impl MapLayer {
                 }
             }
         }
-        place_labels(pm, text, labels, &marks, ship_size, name_px, &mut self.label_spots);
+        place_labels(pm, text, labels, ship_size, name_px);
     }
 }
 
@@ -390,28 +375,7 @@ impl MapLayer {
     }
 }
 
-/// An axis-aligned box, for keeping names apart.
-#[derive(Clone, Copy, Debug)]
-struct Rect {
-    x0: f32,
-    y0: f32,
-    x1: f32,
-    y1: f32,
-}
-
-impl Rect {
-    fn around(x: f32, y: f32, half: f32) -> Self {
-        Self { x0: x - half, y0: y - half, x1: x + half, y1: y + half }
-    }
-
-    fn overlaps(&self, o: &Rect) -> bool {
-        self.x0 < o.x1 && o.x0 < self.x1 && self.y0 < o.y1 && o.y0 < self.y1
-    }
-}
-
 struct NameLabel {
-    /// The ship's entity id; a wreck keeps its ship's.
-    id: u32,
     text: String,
     x: f32,
     y: f32,
@@ -419,110 +383,24 @@ struct NameLabel {
     alpha: f32,
     detected: bool,
     is_self: bool,
-    /// A sunk ship's name: placed after every live ship's, and dropped where
-    /// it does not fit.
+    /// A sunk ship's name: drawn under every live ship's.
     wreck: bool,
 }
 
-/// Frames a name's new spot (or its hiding) must hold before the name moves:
-/// a third of a second at 30 fps. Without it, names jump between spots and
-/// blink in and out as ships pass each other.
-const LABEL_SETTLE: u8 = 10;
-
-/// A name's spot across frames: 0 below the ship, 1 above, 2 right, 3 left;
-/// `None` where it fits nowhere.
-#[derive(Clone, Copy, Debug)]
-struct LabelSpot {
-    slot: Option<u8>,
-    /// The spot it would rather have, and for how many frames in a row.
-    want: Option<u8>,
-    since: u8,
-}
-
-impl LabelSpot {
-    fn new(slot: Option<u8>) -> Self {
-        Self { slot, want: slot, since: 0 }
-    }
-
-    /// Takes this frame's best spot and returns the one to draw at: the
-    /// current one until `best` has held for `LABEL_SETTLE` frames.
-    fn next(&mut self, best: Option<u8>) -> Option<u8> {
-        if best == self.slot {
-            self.since = 0;
-        } else {
-            if self.want == best {
-                self.since = self.since.saturating_add(1);
-            } else {
-                self.want = best;
-                self.since = 1;
-            }
-            if self.since >= LABEL_SETTLE {
-                self.slot = best;
-                self.since = 0;
-            }
-        }
-        self.slot
-    }
-}
-
-/// Draws ship names after every mark. A name keeps its spot from the last
-/// frame while that is free, else takes the first free one of: below the
-/// ship, above its health bar, right, left; it moves (or hides) only once
-/// that change has held for `LABEL_SETTLE` frames, overlapping meanwhile.
-/// Names that fit nowhere are dropped for ships out of sight and drawn faded
-/// below for ships in sight. The recording player's ship is placed first,
-/// then ships in sight, then ships out of sight, then wrecks.
-fn place_labels(
-    pm: &mut Pixmap,
-    text: &mut Text,
-    mut labels: Vec<NameLabel>,
-    marks: &[Rect],
-    ship: f32,
-    px: f32,
-    spots: &mut std::collections::HashMap<u32, LabelSpot>,
-) {
-    labels.sort_by_key(|l| (!l.is_self, !l.detected, l.wreck));
-    // Ships gone from the map forget their spot.
-    let shown: std::collections::HashSet<u32> = labels.iter().map(|l| l.id).collect();
-    spots.retain(|id, _| shown.contains(id));
+/// Draws ship names after every mark, centred under each ship. Names that
+/// overlap stay where they are; the recording player's is drawn on top, then
+/// ships in sight, then ships out of sight, then wrecks.
+fn place_labels(pm: &mut Pixmap, text: &mut Text, mut labels: Vec<NameLabel>, ship: f32, px: f32) {
+    labels.sort_by_key(|l| (l.is_self, l.detected, !l.wreck));
     let cap = text.cap_height(px);
-    let pad = px * 0.15;
-    let mut placed: Vec<Rect> = Vec::new();
     for l in labels {
         // Long ship names shortened as the game does ("M. Colonna").
         let name = text.fit_name(&l.text, px, Weight::Bold, px * 9.0);
         let w = text.width(&name, px, Weight::Bold);
-        // Candidate baselines and left edges.
-        let below = (l.x - w / 2.0, l.y + ship * 0.72 + cap);
-        let candidates = [
-            below,
-            (l.x - w / 2.0, l.y - ship * 0.95),
-            // Clear of the ship's own mark (half-size 0.6 × ship).
-            (l.x + ship * 0.62 + pad, l.y + cap / 2.0),
-            (l.x - ship * 0.62 - pad - w, l.y + cap / 2.0),
-        ];
-        let rect = |(x, b): (f32, f32)| Rect { x0: x - pad, y0: b - cap - pad, x1: x + w + pad, y1: b + pad * 2.0 };
-        let fits = |i: u8| {
-            let r = rect(candidates[usize::from(i)]);
-            !placed.iter().any(|p| p.overlaps(&r)) && !marks.iter().any(|m| m.overlaps(&r))
-        };
-        let first_free = || (0..4u8).find(|&i| fits(i));
-        let spot = spots.entry(l.id).or_insert_with(|| LabelSpot::new(first_free()));
-        let best = match spot.slot {
-            Some(s) if fits(s) => Some(s),
-            _ => first_free(),
-        };
-        let (at, alpha) = match spot.next(best) {
-            Some(s) => (candidates[usize::from(s)], l.alpha),
-            // The recording player's name never fades.
-            None if l.is_self => (below, l.alpha),
-            None if l.detected => (below, l.alpha * 0.45),
-            None => continue,
-        };
-        placed.push(rect(at));
+        let (x, y) = (l.x - w / 2.0, l.y + ship * 0.72 + cap);
         // A dark halo keeps names readable over bright map areas.
-        text.draw(pm, &name, at.0 + 0.6, at.1 + 0.6, px, Weight::Bold, Align::Left, [0; 3], 0.6 * alpha);
-        text.draw(pm, &name, at.0, at.1, px, Weight::Bold, Align::Left, l.color, alpha);
+        text.draw(pm, &name, x + 0.6, y + 0.6, px, Weight::Bold, Align::Left, [0; 3], 0.6 * l.alpha);
+        text.draw(pm, &name, x, y, px, Weight::Bold, Align::Left, l.color, l.alpha);
     }
 }
 
@@ -603,30 +481,7 @@ fn plane_icon(pm: &mut Pixmap, kind: PlaneKind, x: f32, y: f32, s: f32, color: R
 
 #[cfg(test)]
 mod tests {
-    use super::LABEL_SETTLE;
-    use super::LabelSpot;
     use super::PlaneKind;
-
-    #[test]
-    fn a_label_ignores_flicker_and_follows_a_lasting_change() {
-        let mut spot = LabelSpot::new(Some(0));
-        // A neighbour passing by every other frame: the name stays put.
-        for i in 0..40 {
-            assert_eq!(spot.next(if i % 2 == 0 { Some(1) } else { Some(0) }), Some(0), "frame {i}");
-        }
-        // Blocked for good: it moves once the change has held long enough.
-        for i in 1..LABEL_SETTLE {
-            assert_eq!(spot.next(Some(2)), Some(0), "frame {i}");
-        }
-        assert_eq!(spot.next(Some(2)), Some(2));
-        // Hiding settles the same way, and so does coming back.
-        for _ in 1..LABEL_SETTLE {
-            assert_eq!(spot.next(None), Some(2));
-        }
-        assert_eq!(spot.next(None), None);
-        assert_eq!(spot.next(Some(3)), None);
-        assert_eq!(spot.next(None), None, "a one-frame gap does not show it");
-    }
 
     #[test]
     fn plane_kinds_from_icon_keys() {

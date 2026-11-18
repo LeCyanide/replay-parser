@@ -22,7 +22,6 @@ use crate::world::World;
 pub const MINIMAP_SIZE: u32 = 768;
 
 pub const SELF_COLOR: [u8; 3] = [255, 255, 255];
-pub const DIVISION_COLOR: [u8; 3] = [255, 215, 0];
 pub const ALLY_COLOR: [u8; 3] = [76, 232, 170];
 pub const ENEMY_COLOR: [u8; 3] = [254, 77, 42];
 pub const NEUTRAL_COLOR: [u8; 3] = [255, 255, 255];
@@ -444,8 +443,8 @@ fn depth(buoyancy: i64) -> Option<&'static str> {
 /// [`labels`] for this world's players; `flights` paces shell tracers (see
 /// [`flights`]; empty falls back to `serverTimeLeft`).
 ///
-/// Not yet, against the renderer: division mates' gold colour, the
-/// disconnected flag, name colours by loaded ammo, submarine depth in the
+/// Division mates are drawn in their team's colour. Not yet, against the
+/// renderer: the disconnected flag, name colours by loaded ammo, submarine depth in the
 /// ship name, position interpolation between packets.
 pub fn frame<'a>(
     world: &World,
@@ -466,11 +465,6 @@ pub fn frame<'a>(
         })
     };
     let screen = |yaw: f32| std::f32::consts::FRAC_PI_2 - yaw;
-    // Division mates are gold, outside clan battles.
-    let ship_color = |id: u32, r: u32| match world.player_of(id) {
-        Some(p) if r != 0 && world.division_mate(p) => DIVISION_COLOR,
-        _ => relation_color(r),
-    };
 
     // Zones without a control point (arms-race buffs, …) are not caps.
     for c in world.caps.values().filter(|c| c.enabled && c.index >= 0) {
@@ -523,12 +517,7 @@ pub fn frame<'a>(
         let at = |f: f32| map.px(s.from[0] + (s.to[0] - s.from[0]) * f, s.from[2] + (s.to[2] - s.from[2]) * f);
         let frac = elapsed / duration;
         let head = at(frac);
-        out.push(Draw::ShotTracer {
-            from: at((frac - len).max(0.0)),
-            to: head,
-            color: ship_color(s.owner, r),
-            secondary,
-        });
+        out.push(Draw::ShotTracer { from: at((frac - len).max(0.0)), to: head, color: relation_color(r), secondary });
         if let Some(p) = shell {
             out.push(Draw::ShotTracerTip { at: head, color: ammo_color(&p.ammo_type), secondary });
         }
@@ -540,7 +529,7 @@ pub fn frame<'a>(
         // Unknown owners are skipped rather than coloured by a guess.
         let Some(r) = relation(t.owner) else { continue };
         if x.abs() <= half && z.abs() <= half {
-            out.push(Draw::Torpedo { pos: map.px(x, z), color: ship_color(t.owner, r) });
+            out.push(Draw::Torpedo { pos: map.px(x, z), color: relation_color(r) });
         }
     }
 
@@ -600,7 +589,7 @@ pub fn frame<'a>(
                 pos,
                 yaw,
                 species,
-                color: Some(ship_color(id, rel)),
+                color: Some(relation_color(rel)),
                 detected: true,
                 opacity: 1.0,
                 is_self: rel == 0,
@@ -660,7 +649,7 @@ pub fn frame<'a>(
                 map.px(m.position[0], m.position[1])
             },
             yaw: screen(aim),
-            color: ship_color(id, relation(id).unwrap_or(2)),
+            color: relation_color(relation(id).unwrap_or(2)),
             length: CAMERA_LINE,
         });
     }
