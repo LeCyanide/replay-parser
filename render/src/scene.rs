@@ -238,7 +238,7 @@ pub fn render(
         |world: &World, t: f32, frame: &mut Pixmap, cap_events: &mut Vec<Event>, caps_seen: &mut BTreeMap<u32, i64>| {
             let cmds = draw::frame(world, &geometry, &labels, gp, &flights, t);
             frame.draw_pixmap(0, 0, layer.background.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
-            layer.paint(frame, &mut text, &icons, &cmds, world, t);
+            layer.paint(frame, &mut text, &icons, &cmds, t);
             track_caps(world, t - span.start, caps_seen, cap_events);
             let sb = sidebar(
                 world,

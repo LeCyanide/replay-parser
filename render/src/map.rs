@@ -3,7 +3,6 @@
 
 use replay_parser::draw::Draw;
 use replay_parser::draw::MINIMAP_SIZE;
-use replay_parser::world::World;
 use tiny_skia::FilterQuality;
 use tiny_skia::Pixmap;
 use tiny_skia::PixmapPaint;
@@ -121,16 +120,8 @@ fn ammo_tint(tip: Rgb) -> Rgb {
 
 impl MapLayer {
     /// Paints `cmds` onto `pm` (which already holds the background at
-    /// `(0, 0)`). `world` resolves dead ships' sides.
-    pub fn paint(
-        &mut self,
-        pm: &mut Pixmap,
-        text: &mut Text,
-        icons: &Icons,
-        cmds: &[Draw<'_>],
-        world: &World,
-        clock: f32,
-    ) {
+    /// `(0, 0)`).
+    pub fn paint(&mut self, pm: &mut Pixmap, text: &mut Text, icons: &Icons, cmds: &[Draw<'_>], clock: f32) {
         let k = self.size as f32 / MINIMAP_SIZE as f32;
         self.update_trails(cmds, clock);
         self.paint_trails(pm, k, clock);
@@ -138,12 +129,6 @@ impl MapLayer {
         let r = |v: i32| v as f32 * k;
         let ship_size = SHIP_PX * k;
         let name_px = NAME_PX * k;
-        let own = world.own_team();
-        let side_color = |id: u32| match (world.ships.get(&id).map(|s| s.team), own) {
-            (Some(t), Some(o)) if t == o => ALLY,
-            (Some(_), Some(_)) => ENEMY,
-            _ => NEUTRAL_FILL,
-        };
         // The last streak drawn, for its head: (tail, head, width, alpha).
         let mut tracer: Option<([f32; 2], [f32; 2], f32, f32)> = None;
         let mut labels: Vec<NameLabel> = Vec::new();
@@ -246,9 +231,10 @@ impl MapLayer {
                     rect(pm, bx, by, w, h, *background_color, *background_alpha);
                     rect(pm, bx, by, w * fraction.clamp(0.0, 1.0), h, *fill_color, 1.0);
                 }
-                Draw::DeadShip { entity_id, pos, yaw, species, is_self, player_name, ship_name } => {
+                Draw::DeadShip { pos, yaw, species, player_name, ship_name, .. } => {
                     let [x, y] = p(*pos);
-                    let fill = if *is_self { ALLY } else { side_color(*entity_id) };
+                    // Grey, own ship included: a wreck is out of the battle.
+                    let fill = NEUTRAL_FILL;
                     self.glyphs.draw(
                         pm,
                         &ShipMark {

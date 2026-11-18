@@ -176,7 +176,8 @@ pub enum Draw<'a> {
         /// Screen angle: π/2 − world yaw (0 points east, π/2 north).
         yaw: f32,
         species: Option<&'a str>,
-        /// None while undetected.
+        /// The side's colour, in sight or not. (None is never sent; the
+        /// type stays for the baked format's flag.)
         color: Option<[u8; 3]>,
         detected: bool,
         opacity: f32,
@@ -625,12 +626,14 @@ pub fn frame<'a>(
                 pos: map.px(m.position[0], m.position[1]),
                 yaw,
                 species,
-                color: None,
+                // Out of sight it keeps its side's colour and its name, faded;
+                // grey is for wrecks.
+                color: Some(relation_color(rel)),
                 detected: false,
                 opacity: UNDETECTED_OPACITY,
                 is_self: rel == 0,
-                player_name: None,
-                ship_name: None,
+                player_name: l.map(|l| l.player.as_str()),
+                ship_name: l.and_then(|l| l.ship.as_deref()).map(Cow::Borrowed),
                 is_detected_teammate: false,
                 is_disconnected: disconnected(id),
                 name_color: None,
