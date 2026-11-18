@@ -122,7 +122,7 @@ alone. Next is putting the renderer in front of people — the Discord bot
 and the suite — then keeping up with game patches. `docs/INTEGRATION.md` is
 the brief for steps 1 and 2.
 
-1. **Discord bot: `/render`** ☁ (wows-tactics-bot) — a slash command that
+1. **Discord bot: `/render`** ☁ (wows-suite-bot) — a slash command that
    takes a `.wowsreplay` and answers with the MP4, through
    `bindings/node`. Deploy: the binary and a data directory on the VPS.
 2. **Suite** ☁ (tactics-suite) — merge the sidecar cut-over (its branch

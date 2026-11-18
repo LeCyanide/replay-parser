@@ -10,7 +10,7 @@ to start from).
 | Repo | State |
 | --- | --- |
 | `LeCyanide/replay-parser` (this) | Parser, `wows-render` CLI, MP4 encoder, Node wrapper (`bindings/node`, `@tactics/wows-render`) on `main`. PR 2 (`claude/render-cosmetics`, render looks) open; merge it first or branch from it. |
-| `LeCyanide/wows-tactics-bot` | discord.js 14, Node, TypeScript bundled with esbuild to `dist/bot.js`, SQLite, systemd on a VPS behind Caddy. **No replay code yet.** Commands live in `src/commands/` (one file each, listed in `src/commands/index.ts`, registered with `npm run register`). |
+| `LeCyanide/wows-suite-bot` | discord.js 14, Node, TypeScript bundled with esbuild to `dist/bot.js`, SQLite, systemd on a VPS behind Caddy. **No replay code yet.** Commands live in `src/commands/` (one file each, listed in `src/commands/index.ts`, registered with `npm run register`). |
 | `LeCyanide/tactics-suite` | Electron app. Its replay viewer bakes replays with a Rust sidecar (`sidecar/`). The cut-over of that sidecar to this parser is on branch `claude/keen-hawking-k8h8pf` (commit 530a14f), pushed, **no PR yet**; `main` still uses the old toolkit crates. |
 
 Verified locally on 2026-11-17: `replay-dump datapack` against a live install
@@ -97,7 +97,7 @@ built now.
 
 ### Done
 
-- **Bot `/render`**: [LeCyanide/wows-tactics-bot#1](https://github.com/LeCyanide/wows-tactics-bot/pull/1)
+- **Bot `/render`**: [LeCyanide/wows-suite-bot#1](https://github.com/LeCyanide/wows-suite-bot/pull/1)
   (draft). Steps 1–5 above:
   - wrapper vendored as `src/render/wows-render.ts` from `bindings/node`
     (8466aba, unchanged at 7855113). One change: a constructor parameter
