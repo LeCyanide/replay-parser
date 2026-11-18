@@ -87,3 +87,76 @@ Linux.
 - Never commit game files (defs, GameParams, maps, `battle_hud` icons) or
   other players' replays.
 - One branch and PR per repo; don't merge without the owner.
+
+## Progress (2026-11-18, cloud session)
+
+Owner decisions taken this round: `/render` is open to every member and
+answers publicly (refusals before the download stay private); the suite PR
+comes from `claude/festive-einstein-a1jjmn`; "Export video" (§2.4) is not
+built now.
+
+### Done
+
+- **Bot `/render`**: [LeCyanide/wows-tactics-bot#1](https://github.com/LeCyanide/wows-tactics-bot/pull/1)
+  (draft). Steps 1–5 above:
+  - wrapper vendored as `src/render/wows-render.ts` from `bindings/node`
+    (8466aba, unchanged at 7855113). One change: a constructor parameter
+    property became a field, because the bot's `npm run dev` runs `.ts`
+    through Node's type stripping, which cannot erase it. Keep
+    `bindings/node/src/index.ts` free of parameter properties, enums and
+    namespaces so it can be copied over as is.
+  - queue: 1 running, 3 waiting, 1 per member, 150 s timeout per render.
+    The worst case is 10 min, inside Discord's 15-minute window.
+  - the CLI's `unsupported_version` message holds the server's data path,
+    so the bot extracts only the version from it. If that message's wording
+    changes, the bot's regex (`failureMessage` in `src/render/replay.ts`)
+    must follow.
+  - typecheck clean, selftest 105/105 (8 new, fake binary). End to end
+    without Discord: 7 fixtures through the bot's download → queue →
+    wrapper path with the real release binary, 2.2–6.2 MB, 4.5–14 s each.
+    This was measured in the cloud container, not on the VPS.
+  - deploy steps for the owner are in the bot README (Deploying → The
+    renderer). Not done: the VPS install and `npm run register`.
+- **Suite §2.1**: [LeCyanide/tactics-suite#8](https://github.com/LeCyanide/tactics-suite/pull/8)
+  (draft). It carries keen-hawking's cut-over plus one commit: a git
+  dependency at rev 7855113 (main), `sidecar/.cargo/config.toml` with
+  `net.git-fetch-with-cli = true` (this repo is private), no sibling check,
+  and docs for bumping `rev` or patching in a local checkout. Built and
+  probed on Linux; the Windows GNU build is untested.
+
+### Open tasks
+
+| # | Task | Owner | Notes |
+| --- | --- | --- | --- |
+| 1 | Install `wows-render` and the data pack on the VPS, set the two env vars, `npm run register`, try `/render` in Discord | owner | Live Discord and the VPS were not testable here |
+| 2 | Build the sidecar on Windows (`npm run build:sidecar`) from suite#8 | owner | Needs `git clone` of this repo to work on that machine |
+| 3 | **Suite §2.2 is blocked by a gap, not a table swap** | decision needed | See below |
+| 4 | Suite §2.3 sidebar parity | after 3 | Differences listed below |
+| 5 | Measure render time and memory on the VPS; raise the queue to 2 if it has the cores | owner | `RenderQueue(1, 3)` in `src/commands/render.ts` |
+| 6 | Data pack after every patch; old-version fallback | owner / later | Unchanged from STATUS.md |
+| 7 | Suite §2.4 "Export video" | parked | Product decision; not built |
+
+**3. Death causes in the suite.** `ReplayEventsPanel` (and its
+`causeLabel` table, toolkit `DeathCause` names) exists only on the suite's
+`prototype` branch. That branch's toolkit-based sidecar writes an `events`
+header block (kills with cause, roster, scores, caps, winner). The cut-over
+sidecar (keen-hawking, now suite#8) writes no `events` block, so the panel
+gets nothing on top of it. Adopting `replay_parser::constants` therefore
+means:
+(a) the sidecar emits `events` from the parser's world, with causes as
+`DEATH_REASON_NAME` strings via `constants::death_reason` (and the build's
+own table where `battle.xml` is available);
+(b) `causeLabel` maps those names (TORPEDO, TBOMB, BURNING, FLOOD, RAM,
+BOMB, SKIP_BOMB, ROCKET, DBOMB, ADBOMB, DETONATE, ATBA, SEA_MINE, …);
+(c) `prototype` merges with the cut-over.
+This is new sidecar output and a cross-branch merge, so the owner should
+confirm the direction first.
+
+**4. Parity differences** (suite `prototype` panel vs `render/src/sidebar.rs`):
+the suite sorts the lineup by class and then name, while the renderer keeps
+the given order. The renderer has health bars, the suite has none. The suite
+lists every event with future ones dimmed, while the video shows past events
+only. The renderer shows times as a countdown, the suite as time elapsed.
+The renderer uses the game's frag icons, the suite uses verbs. The headings
+and empty texts differ. Some of these are deliberate for a video (past-only
+events, the countdown); decide which side is canonical before mirroring.
