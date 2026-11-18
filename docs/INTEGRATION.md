@@ -5,19 +5,24 @@ A handover for a cloud session. Written 2026-11-17. Read this first, then
 and `bindings/node/README.md` (the Node API, including a discord.js handler
 to start from).
 
-## Where things stand
+## Where things stand (2026-11-18, evening)
+
+Sections 1 and 2 are done and live; what is left is the open-task table at
+the end.
 
 | Repo | State |
 | --- | --- |
-| `LeCyanide/replay-parser` (this) | Parser, `wows-render` CLI, MP4 encoder, Node wrapper (`bindings/node`, `@tactics/wows-render`) on `main`. PR 2 (`claude/render-cosmetics`, render looks) open; merge it first or branch from it. |
-| `LeCyanide/wows-suite-bot` | discord.js 14, Node, TypeScript bundled with esbuild to `dist/bot.js`, SQLite, systemd on a VPS behind Caddy. **No replay code yet.** Commands live in `src/commands/` (one file each, listed in `src/commands/index.ts`, registered with `npm run register`). |
-| `LeCyanide/tactics-suite` | Electron app. Its replay viewer bakes replays with a Rust sidecar (`sidecar/`). The cut-over of that sidecar to this parser is on branch `claude/keen-hawking-k8h8pf` (commit 530a14f), pushed, **no PR yet**; `main` still uses the old toolkit crates. |
+| `LeCyanide/replay-parser` (this) | **Public** since 2026-11-18 (GPL-3.0). `main` at 14a4c36; CI keeps the Linux binary as the `wows-render-linux` artifact. |
+| `LeCyanide/wows-suite-bot` (private, clan bot) | `/render` merged (#1) and live on the VPS, registered in Tactics Haven. |
+| `LeCyanide/sye-wows-bot` (public, self-hosted) | `/render` merged (#1): optional, the Docker image builds `wows-render` from this repo; relicensed GPL-3.0 because it carries `bindings/node`. |
+| `LeCyanide/tactics-suite` | Cut-over (#8) and battle panel (#9) merged into `main`; the sidecar pins this repo at 7855113. |
+| `LeCyanide/fw-suite.de` | Replay Renderer page live at projects.fw-suite.de/replays/ (the site moved to fw-suite.de + projects.fw-suite.de the same day). |
 
-Verified locally on 2026-11-17: `replay-dump datapack` against a live install
-built the 15.10 data pack (build 13533378), and a 15.10 Random battle
-rendered with it (706 frames, 5 MB). Game files never go into any repo.
+Game files never go into any repo.
 
-## 1. Bot: `/render` (do this first)
+## 1. Bot: `/render` (done)
+
+Kept for the reasoning behind the bot's choices.
 
 Goal: a member attaches a `.wowsreplay`, the bot answers with the MP4.
 
@@ -62,7 +67,7 @@ or run a real Discord. It can fetch the public test replays and 15.9-or-older
 definitions with `scripts/fetch-fixtures.sh` and render those end to end on
 Linux.
 
-## 2. Suite
+## 2. Suite (1–3 done, 4 parked)
 
 1. Open a PR in `tactics-suite` for `claude/keen-hawking-k8h8pf` (the sidecar
    cut-over; its commit message lists what was checked). Before merging,
@@ -97,8 +102,8 @@ built now.
 
 ### Done
 
-- **Bot `/render`**: [LeCyanide/wows-suite-bot#1](https://github.com/LeCyanide/wows-suite-bot/pull/1)
-  (draft). Steps 1–5 above:
+- **Bot `/render`**: [LeCyanide/wows-suite-bot#1](https://github.com/LeCyanide/wows-suite-bot/pull/1),
+  merged and deployed 2026-11-18. Steps 1–5 above:
   - wrapper vendored as `src/render/wows-render.ts` from `bindings/node`
     (8466aba, unchanged at 7855113). One change: a constructor parameter
     property became a field, because the bot's `npm run dev` runs `.ts`
@@ -115,12 +120,23 @@ built now.
     without Discord: 7 fixtures through the bot's download → queue →
     wrapper path with the real release binary, 2.2–6.2 MB, 4.5–14 s each.
     This was measured in the cloud container, not on the VPS.
-  - deploy steps for the owner are in the bot README (Deploying → The
-    renderer). Not done: the VPS install and `npm run register`.
-- **Suite §2.1**: [LeCyanide/tactics-suite#8](https://github.com/LeCyanide/tactics-suite/pull/8)
-  (draft). It carries keen-hawking's cut-over plus one commit: a git
+  - live on the VPS (`/usr/local/bin/wows-render` from the CI artifact,
+    data pack in `/srv/wows-data` with 15.9 and 15.10). Measured there: about
+    10 s and 65 MB peak per render on 1 core, so the queue stays at one.
+- **Public bot `/render`**: [LeCyanide/sye-wows-bot#1](https://github.com/LeCyanide/sye-wows-bot/pull/1),
+  merged. Same code as the clan bot, but optional: registered globally only
+  when `WOWS_RENDER_BIN` and `WOWS_DATA_DIR` are set and the data folder has
+  `defs/`. Docker builds `wows-render` from this repo at a pinned commit
+  (bump `REPLAY_PARSER_REF` in its Dockerfile to follow `main`). Each host
+  builds its own data pack with `scripts/build-data.sh`. The copied wrapper
+  is GPL-3.0, so that bot is GPL-3.0 now too. Selftest 33/33 and two real
+  15.10 replays end to end; its Docker build and a live self-hosted Discord
+  are untested.
+- **Suite §2.1**: [LeCyanide/tactics-suite#8](https://github.com/LeCyanide/tactics-suite/pull/8),
+  merged 2026-11-18 together with #9. It carries keen-hawking's cut-over plus one commit: a git
   dependency at rev 7855113 (main), `sidecar/.cargo/config.toml` with
-  `net.git-fetch-with-cli = true` (this repo is private), no sibling check,
+  `net.git-fetch-with-cli = true` (needed while this repo was private;
+  harmless now), no sibling check,
   and docs for bumping `rev` or patching in a local checkout. Built and
   probed on Linux; the Windows GNU build is untested.
 
@@ -128,15 +144,20 @@ built now.
 
 | # | Task | Owner | Notes |
 | --- | --- | --- | --- |
-| 1 | Install `wows-render` and the data pack on the VPS, set the two env vars, `npm run register`, try `/render` in Discord | owner | Live Discord and the VPS were not testable here |
-| 2 | ~~Build the sidecar on Windows (`npm run build:sidecar`) from suite#8~~ | done 2026-11-18 | GNU toolchain, private git fetch via the machine's login, 15 s, 1.8 MB |
-| 3 | Suite §2.2: review [LeCyanide/tactics-suite#9](https://github.com/LeCyanide/tactics-suite/pull/9) (stacked on #8), ~~bake a real replay~~, ~~check the panel~~ | owner review | Real 15.10 bake done 2026-11-18 on Windows: 5884 frames in 4.6 s, `events` has kills with causes, roster, scores, health, `timeLimit`. The panel checked against it in `dev/app-preview.html`: score, caps, lineups, countdown, feed newest at the bottom. Not checked inside Electron (the IPC hop) |
-| 4 | Suite §2.3 sidebar parity: done in suite#9 (video sidebar is the reference) | owner review | Keep `render/src/sidebar.rs` and the suite's `ReplayEventsPanel` in step |
-| 5 | Measure render time and memory on the VPS; raise the queue to 2 if it has the cores | owner | `RenderQueue(1, 3)` in `src/commands/render.ts` |
-| 6 | Data pack after every patch; old-version fallback | owner / later | Pack: `scripts/build-data.sh` with the version key. If the patch needs parser changes: push them, let CI pass, install that run's `wows-render-linux` artifact on the VPS (`docs/DEPLOY.md`) |
+| 1 | ~~Install on the VPS, `npm run register`, try `/render`~~ | done 2026-11-18 | Registered in Tactics Haven only. To add it to another server (e.g. Western Approaches Command), run `npm run register` with that server's `DISCORD_GUILD_ID` |
+| 2 | ~~Build the sidecar on Windows~~ | done 2026-11-18 | GNU toolchain, 15 s, 1.8 MB |
+| 3 | ~~Suite §2.2 / #9: bake a real replay, check the panel, review~~ | done 2026-11-18 | Merged. Not checked inside Electron (the IPC hop) |
+| 4 | ~~Suite §2.3 sidebar parity~~ | done in suite#9 | Keep `render/src/sidebar.rs` and the suite's `ReplayEventsPanel` in step |
+| 5 | ~~Measure on the VPS~~ | done 2026-11-18 | ~10 s, 65 MB peak, 1 core: queue stays `RenderQueue(1, 3)` |
+| 6 | Data pack after every patch (15.11 next) | owner, each patch | `scripts/build-data.sh` with the version key, copy to `/srv/wows-data` on the VPS. If the patch needs parser changes: push them, let CI pass, install that run's `wows-render-linux` artifact (`docs/DEPLOY.md`), and bump `REPLAY_PARSER_REF` in sye-wows-bot's Dockerfile |
 | 7 | Suite §2.4 "Export video" | parked | Product decision; not built |
-| 8 | Kill icons in the suite: copy `gui/battle_hud/icon_frag/*.png` into the suite's `seed/battle_hud/icon_frag/` (code is in suite#9; words until then) | owner | The installer then ships them. The suite's notices say it redistributes no game files; reword them |
-| 9 | ~~Name placement with collision checks on the suite's map~~ | dropped | Owner decision 2026-11-18: names sit under the ship in the video too, overlaps allowed; division mates in team colour |
+| 8 | Kill icons in the suite: copy `gui/battle_hud/icon_frag/*.png` into the suite's `seed/battle_hud/icon_frag/` | owner | Still only the folder's README on `main`; the panel shows words until then. The suite's notices say it redistributes no game files; reword them |
+| 9 | ~~Name placement with collision checks~~ | dropped | Names sit under the ship, overlaps allowed; division mates in team colour |
+| 10 | Bump the suite's sidecar `rev` from 7855113 to 14a4c36 | owner / next suite release | Picks up division mates in team colour (`src/draw.rs`); nothing else in the parser changed since |
+| 11 | Suite selftest: 2 failures against a real bake | later | Test-fixture artefacts, not bugs: the frame count (round vs floor+1) and a hard-coded Des Moines name |
+| 12 | Unsupported-version reply shows doubled brackets, e.g. "(13.0.0 (build 7))" | later | `failureMessage` in both bots' `src/render/replay.ts` |
+| 13 | Clan bot README still has the "port `/render` to the public bot" to-do | later | Done in sye-wows-bot#1; drop the paragraph |
+| 14 | Check sye-wows-bot's Docker build and `/render` on a self-hosted copy | owner | Needs Docker and a test server; not run here |
 
 **3. Death causes in the suite (done, suite#9).** `ReplayEventsPanel` (and its
 `causeLabel` table, toolkit `DeathCause` names) exists only on the suite's
