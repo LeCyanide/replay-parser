@@ -24,6 +24,15 @@ COPY --from=render /usr/local/bin/wows-render /usr/local/bin/wows-render
 If Docker Hub rate-limits the build (HTTP 429), pass a mirror:
 `--build-arg RUST_IMAGE=mirror.gcr.io/library/rust:1-bookworm --build-arg RUNTIME_IMAGE=mirror.gcr.io/library/debian:bookworm-slim`.
 
+**From CI.** Every CI run keeps the binary from that image as the
+`wows-render-linux` artifact (private, 90 days). Take it from the run of the
+commit you deploy:
+
+```bash
+gh run download -R LeCyanide/replay-parser <run id> -n wows-render-linux
+chmod +x wows-render
+```
+
 **Without Docker.** `cargo build --release -p wows-replay-render` with a
 C/C++ compiler and `nasm` installed. The binary needs `libstdc++6` and a
 glibc at least as new as the symbols it uses (check with

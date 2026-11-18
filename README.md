@@ -136,7 +136,10 @@ the brief for steps 1 and 2.
    build 13533378: 39 definition files, 1246 ships, 106 icons, about 3 s)
    and rendered a 15.10 Random battle with it. 15.11 is on the test server
    now. Option: fall back to the nearest older definitions when decode
-   failures stay near zero (today: refused).
+   failures stay near zero (today: refused). When the patch needs parser
+   changes, push them, let CI pass, and install the `wows-render-linux`
+   artifact of that run on the bot host (`docs/DEPLOY.md`) along with the
+   new pack.
 4. **Install tests** 🖥 — `WOWS_DIR=… cargo test --release --test install
    -- --ignored`. Pass on the live install (2026-11-17: 242 replays of 15.9
    and 15.10). Rerun after parser changes and each patch.

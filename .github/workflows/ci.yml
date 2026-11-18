@@ -65,3 +65,13 @@ jobs:
             wows-render /in.wowsreplay --out /out/test.mp4 --data /data --max-mb 8
           test -s out/test.mp4
           ls -la out/test.mp4
+      # The bot host installs this binary (docs/DEPLOY.md), so it needs no Rust toolchain.
+      - name: Take the binary out of the image
+        run: |
+          docker create --name wr wows-render
+          docker cp wr:/usr/local/bin/wows-render ./wows-render
+          docker rm wr
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wows-render-linux
+          path: wows-render

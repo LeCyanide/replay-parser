@@ -133,7 +133,7 @@ built now.
 | 3 | Suite §2.2: review [LeCyanide/tactics-suite#9](https://github.com/LeCyanide/tactics-suite/pull/9) (stacked on #8), ~~bake a real replay~~, ~~check the panel~~ | owner review | Real 15.10 bake done 2026-11-18 on Windows: 5884 frames in 4.6 s, `events` has kills with causes, roster, scores, health, `timeLimit`. The panel checked against it in `dev/app-preview.html`: score, caps, lineups, countdown, feed newest at the bottom. Not checked inside Electron (the IPC hop) |
 | 4 | Suite §2.3 sidebar parity: done in suite#9 (video sidebar is the reference) | owner review | Keep `render/src/sidebar.rs` and the suite's `ReplayEventsPanel` in step |
 | 5 | Measure render time and memory on the VPS; raise the queue to 2 if it has the cores | owner | `RenderQueue(1, 3)` in `src/commands/render.ts` |
-| 6 | Data pack after every patch; old-version fallback | owner / later | Unchanged from STATUS.md |
+| 6 | Data pack after every patch; old-version fallback | owner / later | Pack: `scripts/build-data.sh` with the version key. If the patch needs parser changes: push them, let CI pass, install that run's `wows-render-linux` artifact on the VPS (`docs/DEPLOY.md`) |
 | 7 | Suite §2.4 "Export video" | parked | Product decision; not built |
 | 8 | Kill icons in the suite: copy `gui/battle_hud/icon_frag/*.png` into the suite's `seed/battle_hud/icon_frag/` (code is in suite#9; words until then) | owner | The installer then ships them. The suite's notices say it redistributes no game files; reword them |
 | 9 | Optional: name placement with collision checks on the suite's map (the video's `place_labels`) | later | Without it, a wreck's name can sit under a live one in a dense cluster |
