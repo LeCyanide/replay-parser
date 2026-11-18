@@ -135,6 +135,8 @@ built now.
 | 5 | Measure render time and memory on the VPS; raise the queue to 2 if it has the cores | owner | `RenderQueue(1, 3)` in `src/commands/render.ts` |
 | 6 | Data pack after every patch; old-version fallback | owner / later | Unchanged from STATUS.md |
 | 7 | Suite §2.4 "Export video" | parked | Product decision; not built |
+| 8 | Kill icons in the suite: copy `gui/battle_hud/icon_frag/*.png` into the suite's `seed/battle_hud/icon_frag/` (code is in suite#9; words until then) | owner | The installer then ships them. The suite's notices say it redistributes no game files; reword them |
+| 9 | Optional: name placement with collision checks on the suite's map (the video's `place_labels`) | later | Without it, a wreck's name can sit under a live one in a dense cluster |
 
 **3. Death causes in the suite (done, suite#9).** `ReplayEventsPanel` (and its
 `causeLabel` table, toolkit `DeathCause` names) exists only on the suite's
@@ -168,3 +170,9 @@ instead of the game's kill icons, the map, mode and clock in the Playback
 panel, and wrapped event lines. The sidecar added `timeLimit`,
 `roster[].isSelf` and a `health` track to `header.events`. A change to
 either side should be mirrored in the other.
+
+**Wrecks and kill icons (2026-11-18).** Owner decisions: wrecks keep their
+name in grey on both maps (video b155e76: placed after live names, dropped
+where it does not fit; suite#9: under the wreck, following the name
+toggles). Kill icons ship in the suite's seed rather than being read from
+the install. Copying them in is the owner's step (task 8).
