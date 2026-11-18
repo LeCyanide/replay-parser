@@ -153,8 +153,8 @@ This is new sidecar output and a cross-branch merge, so the owner should
 confirm the direction first.
 
 **4. Parity differences** (suite `prototype` panel vs `render/src/sidebar.rs`):
-the suite sorts the lineup by class and then name, while the renderer keeps
-the given order. The renderer has health bars, the suite has none. The suite
+both sort the lineup by class and then name (`scene.rs`). The renderer
+has health bars, the suite has none. The suite
 lists every event with future ones dimmed, while the video shows past events
 only. The renderer shows times as a countdown, the suite as time elapsed.
 The renderer uses the game's frag icons, the suite uses verbs. The headings
