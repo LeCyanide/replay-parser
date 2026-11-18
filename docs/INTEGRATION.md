@@ -129,8 +129,8 @@ built now.
 | # | Task | Owner | Notes |
 | --- | --- | --- | --- |
 | 1 | Install `wows-render` and the data pack on the VPS, set the two env vars, `npm run register`, try `/render` in Discord | owner | Live Discord and the VPS were not testable here |
-| 2 | Build the sidecar on Windows (`npm run build:sidecar`) from suite#8 | owner | Needs `git clone` of this repo to work on that machine |
-| 3 | Suite §2.2: review [LeCyanide/tactics-suite#9](https://github.com/LeCyanide/tactics-suite/pull/9) (stacked on #8), bake a real replay and check the panel | owner | Done in code; a real bake needs the game install |
+| 2 | ~~Build the sidecar on Windows (`npm run build:sidecar`) from suite#8~~ | done 2026-11-18 | GNU toolchain, private git fetch via the machine's login, 15 s, 1.8 MB |
+| 3 | Suite §2.2: review [LeCyanide/tactics-suite#9](https://github.com/LeCyanide/tactics-suite/pull/9) (stacked on #8), ~~bake a real replay~~, check the panel in the app | owner | Real 15.10 bake done 2026-11-18 on Windows: 5884 frames in 4.6 s, `events` has kills with causes, roster, scores, health, `timeLimit`. The panel in the running app is unchecked |
 | 4 | Suite §2.3 sidebar parity: done in suite#9 (video sidebar is the reference) | owner review | Keep `render/src/sidebar.rs` and the suite's `ReplayEventsPanel` in step |
 | 5 | Measure render time and memory on the VPS; raise the queue to 2 if it has the cores | owner | `RenderQueue(1, 3)` in `src/commands/render.ts` |
 | 6 | Data pack after every patch; old-version fallback | owner / later | Unchanged from STATUS.md |
