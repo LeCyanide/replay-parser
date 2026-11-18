@@ -130,13 +130,13 @@ built now.
 | --- | --- | --- | --- |
 | 1 | Install `wows-render` and the data pack on the VPS, set the two env vars, `npm run register`, try `/render` in Discord | owner | Live Discord and the VPS were not testable here |
 | 2 | Build the sidecar on Windows (`npm run build:sidecar`) from suite#8 | owner | Needs `git clone` of this repo to work on that machine |
-| 3 | **Suite §2.2 is blocked by a gap, not a table swap** | decision needed | See below |
+| 3 | Suite §2.2: review [LeCyanide/tactics-suite#9](https://github.com/LeCyanide/tactics-suite/pull/9) (stacked on #8), bake a real replay and check the panel | owner | Done in code; a real bake needs the game install |
 | 4 | Suite §2.3 sidebar parity | after 3 | Differences listed below |
 | 5 | Measure render time and memory on the VPS; raise the queue to 2 if it has the cores | owner | `RenderQueue(1, 3)` in `src/commands/render.ts` |
 | 6 | Data pack after every patch; old-version fallback | owner / later | Unchanged from STATUS.md |
 | 7 | Suite §2.4 "Export video" | parked | Product decision; not built |
 
-**3. Death causes in the suite.** `ReplayEventsPanel` (and its
+**3. Death causes in the suite (done, suite#9).** `ReplayEventsPanel` (and its
 `causeLabel` table, toolkit `DeathCause` names) exists only on the suite's
 `prototype` branch. That branch's toolkit-based sidecar writes an `events`
 header block (kills with cause, roster, scores, caps, winner). The cut-over
@@ -149,8 +149,13 @@ own table where `battle.xml` is available);
 (b) `causeLabel` maps those names (TORPEDO, TBOMB, BURNING, FLOOD, RAM,
 BOMB, SKIP_BOMB, ROCKET, DBOMB, ADBOMB, DETONATE, ATBA, SEA_MINE, …);
 (c) `prototype` merges with the cut-over.
-This is new sidecar output and a cross-branch merge, so the owner should
-confirm the direction first.
+The owner chose a separate PR: [LeCyanide/tactics-suite#9](https://github.com/LeCyanide/tactics-suite/pull/9)
+(branch `claude/festive-einstein-a1jjmn-events`, based on #8's branch) merges
+`prototype`, adds `sidecar/src/events.rs` for (a), and updates `causeLabel`
+with the same words as `kill_verb` in `render/src/sidebar.rs` for (b). Keep
+the two in step. The fixture test passes (7 replays). A real bake and the
+panel in the app are untested. Bakes made on `prototype` with the toolkit
+keep toolkit cause names, which now read "sank"; delete them to rebake.
 
 **4. Parity differences** (suite `prototype` panel vs `render/src/sidebar.rs`):
 both sort the lineup by class and then name (`scene.rs`). The renderer
