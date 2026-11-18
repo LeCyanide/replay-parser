@@ -131,7 +131,7 @@ built now.
 | 1 | Install `wows-render` and the data pack on the VPS, set the two env vars, `npm run register`, try `/render` in Discord | owner | Live Discord and the VPS were not testable here |
 | 2 | Build the sidecar on Windows (`npm run build:sidecar`) from suite#8 | owner | Needs `git clone` of this repo to work on that machine |
 | 3 | Suite §2.2: review [LeCyanide/tactics-suite#9](https://github.com/LeCyanide/tactics-suite/pull/9) (stacked on #8), bake a real replay and check the panel | owner | Done in code; a real bake needs the game install |
-| 4 | Suite §2.3 sidebar parity | after 3 | Differences listed below |
+| 4 | Suite §2.3 sidebar parity: done in suite#9 (video sidebar is the reference) | owner review | Keep `render/src/sidebar.rs` and the suite's `ReplayEventsPanel` in step |
 | 5 | Measure render time and memory on the VPS; raise the queue to 2 if it has the cores | owner | `RenderQueue(1, 3)` in `src/commands/render.ts` |
 | 6 | Data pack after every patch; old-version fallback | owner / later | Unchanged from STATUS.md |
 | 7 | Suite §2.4 "Export video" | parked | Product decision; not built |
@@ -157,11 +157,14 @@ the two in step. The fixture test passes (7 replays). A real bake and the
 panel in the app are untested. Bakes made on `prototype` with the toolkit
 keep toolkit cause names, which now read "sank"; delete them to rebake.
 
-**4. Parity differences** (suite `prototype` panel vs `render/src/sidebar.rs`):
-both sort the lineup by class and then name (`scene.rs`). The renderer
-has health bars, the suite has none. The suite
-lists every event with future ones dimmed, while the video shows past events
-only. The renderer shows times as a countdown, the suite as time elapsed.
-The renderer uses the game's frag icons, the suite uses verbs. The headings
-and empty texts differ. Some of these are deliberate for a video (past-only
-events, the countdown); decide which side is canonical before mirroring.
+**4. Parity (done, suite#9).** Owner decision: the video sidebar
+(`render/src/sidebar.rs`) is the reference, and the suite follows it within
+its fixed sidebar. The suite now has health bars, the banded recording
+player, faded and struck-through sunk ships, a "Battle events" feed with
+past events only, newest at the bottom, on the countdown clock, and caps
+in label order. The Playback panel's clock is also the countdown. The
+suite keeps on purpose: theme colours, trail toggles and seek, kill words
+instead of the game's kill icons, the map, mode and clock in the Playback
+panel, and wrapped event lines. The sidecar added `timeLimit`,
+`roster[].isSelf` and a `health` track to `header.events`. A change to
+either side should be mirrored in the other.
